@@ -1,6 +1,6 @@
 # grokbot-watch 规格 v0 / Spec v0
 
-状态：草案 / 待评审（设计评审轮）。采用模板：workflow-template 2.2.2（workflow v2.2）。
+状态：草案 v0.1 / 待复评（设计评审轮；已按首轮评审的 3 项阻断 S2 修订，见 design/2026-11-16-review-decisions.md）。采用模板：workflow-template 2.2.2（workflow v2.2）。
 对应功能地图：[feature-map.md](feature-map.md)。架构：[architecture.md](architecture.md)。调研与决策归档：[design/](design/)。
 
 ## 1. 背景与目标
@@ -37,19 +37,21 @@
 |---|---|---|
 | B1 | iPhone 配套 app 登录（浏览器授权加 PKCE），token 只存 iPhone Keychain | MVP |
 | B2 | iPhone 端私有接口客户端：Bot 列表、读对话、发消息、widget/approval/user-form 应答、发送状态确认；协议失效检测 | MVP |
-| B3 | WatchConnectivity 消息协议（版本化信封、幂等 ID、应用上下文快照） | MVP |
+| B3 | WatchConnectivity 消息协议（版本化信封、操作 ID、手表持久发件箱、iPhone 先落盘、结果经 transferUserInfo 回传、应用上下文快照） | MVP |
 | F1 | 手表处理确认类问答：widget 单选/多选、Allow/Deny、简单 user-form；结果回显，被拒时恢复按钮 | MVP |
 | F2 | 智能快速回复：针对 Bot 最新一条消息，在 iPhone 端生成 2–4 条候选回复推给手表，一点即发 | MVP |
 | F3 | 自定义常用回复卡片：在 iPhone 端编辑，同步到手表；按 Bot 可选过滤 | MVP |
 | F4 | 语音输入兜底：系统听写（MVP）；录音后交 iPhone 或 xAI 转文字（后续） | MVP（只做系统听写）/ 后续 |
-| F5 | 手表开关语音对话：由 iPhone 跑语音会话，手表做开始/结束/静音和字幕控制 | MVP（手机麦克风模式） |
+| F5 | 手表开关语音对话：由 iPhone 跑语音会话，手表做开始/结束/静音和字幕控制 | MVP（手机麦克风模式；手表能否冷启动通话取决于闸门验证 S-3，不通过则改为“手机发起、手表控制”） |
 | F6 | 麦克风智能路由：手表麦克风（经 iPhone 中转或直连）和手机麦克风之间自动选择、可手动切换 | 后续（取决于验证项 S-1、S-3） |
 | F7 | 手表直连 HTTPS 降级：手机不可达时，手表用自己独立登录的会话直接发送回复和确认 | 后续 |
 | F8 | "需要你处理"收件箱和入口：打开手表 app 即列出主 Bot 待处理的问题；complication 一键进入 | MVP（收件箱）/ 后续（complication、可操作通知） |
 
 ### MVP 范围（第一版）
 
-B1–B3，F1，F2，F3，F4 的系统听写，F5 的手机麦克风模式，F8 的收件箱。
+B1–B3，F1，F2，F3，F4 的系统听写，F5 的手机麦克风模式（形态以 S-3 结论为准），F8 的收件箱。
+
+F5 的实现批次以 S-3 为前置闸门：S-3 没有结论之前，不开始 F5 的实现；其他 MVP 项不受影响。
 
 ### 后续
 
@@ -66,12 +68,17 @@ F4 的录音转写，F6，F7，F8 的 complication 和可操作通知，F2 的 x
 
 ### B2 私有接口客户端
 - [ ] 需求：能区分两类 Bot（sandbox gateway 和服务端 harness），并路由到对应接口。测试：`BotRoutingTests`，用录制的匿名化样例做夹具。验收面：L。
-- [ ] 需求：发送带客户端 nonce；应答丢失时只查发送状态，绝不自动重发。测试：`OutboxTests`。预期：同一个 nonce 最多一次写请求，后续只有状态查询。验收面：L。
+- [ ] 需求：按操作类型执行防重复规则（architecture §5.1）：任何路径都不自动重发；每一次写请求都来自用户的一次显式操作（首次点击或手动重试）。测试：`OutboxTests`。输入：写请求超时、连接中断、5xx、401。预期：自动流程只产生查询（对账）请求，不产生第二次写请求；写请求次数等于用户显式操作次数。验收面：L。
+- [ ] 需求：发消息（快速回复、卡片、听写）使用由 `opId` 派生的客户端 nonce，手动重试沿用同一个 nonce，同一操作最多 3 次写请求；结果未知时按 harness 对账：服务端 Bot 用发送状态查询（约每 2 s 一次，60 s 后放弃），gateway Bot 读对话尾部按 nonce 加文本核对。测试：`MessageReconcileTests`。预期：对账确认已送达后，手动重试按钮消失；同一 nonce 在服务端只留一条。验收面：L。
+- [ ] 需求：确认答复（widget、Allow/Deny）和表单（user-form）没有 nonce，靠条目状态去重：写之前和手动重试之前都先重读条目（widget 的已答值、approval 的 `status`、表单的处理结果），已经处理过就直接显示结果，不再写。测试：`EntryStateGuardTests`。输入：条目已答、已过期、仍待处理三种状态。预期：只有"仍待处理"时才发写请求。验收面：L。
 - [ ] 需求：响应字段缺失、类型变化、401/403/404、未知枚举都归入"协议失效"分类，对应功能降级而不崩溃。测试：`ProtocolGuardTests`。验收面：L。
 
 ### B3 WatchConnectivity 协议
 - [ ] 需求：所有消息使用版本化信封 `{v, id, type, sentAt, body}`；版本不匹配时回 `error.version`。测试：`EnvelopeCodecTests`。验收面：L。
-- [ ] 需求：写操作带幂等 ID，iPhone 端去重，重复投递不产生第二次写请求。测试：`RelayIdempotencyTests`。验收面：L。
+- [ ] 需求：手表为每次用户操作生成一个 `opId`，先写入手表本地持久发件箱再交给 WatchConnectivity；状态为 `queued → handedToPhone → accepted / rejected / unknown`。WC 报错、回执丢失、手表 app 被挂起时都不换 `opId`。测试：`WatchOutboxTests`。预期：手表重启后发件箱条目还在，状态不倒退。验收面：L、D。
+- [ ] 需求：iPhone 收到写请求后，先把 `opId → 服务器请求 ID（nonce）, state=pending` 落盘（write-ahead），落盘成功才发网络写请求；重启后遇到 pending 记录只对账，不再写。去重记录保留 7 天。测试：`RelayIdempotencyTests`。输入：①回执丢失后手表用同一 `opId` 重投；②iPhone 在写请求发出后、结果落盘前被杀，重启后同一 `opId` 再次投递；③同一 `opId` 经 WC 投递两次。预期：三种情况都只有一次写请求，后续只对账。验收面：L。
+- [ ] 需求：服务器请求 ID 由手表 `opId` 确定性派生（规则见 architecture §5.2），中转路径和后续 F7 直连路径对同一操作落到同一个服务端 nonce；已交给手机、结果未知的操作不得改走直连新发。测试：`NonceDerivationTests`。验收面：L。
+- [ ] 需求：回执分两段：`sendMessage` 的 reply 只回"手机已接收"（`op.ack`）；最终结果（`op.result`）一律经 `transferUserInfo` 回传（排队、保证送达，手表不在前台也不丢），同时写进下一次快照的 `recentOps`。测试：`ResultDeliveryTests`。预期：手表放下手腕后再抬起，能看到最终结果；重复收到同一 `opId` 的结果时只更新一次。验收面：L、D。
 - [ ] 需求：待处理列表和候选回复用 application context 快照下发，手表冷启动时能立即显示上一次快照并标明时间。验收面：S、D。
 
 ### F1 确认类问答
@@ -95,8 +102,13 @@ F4 的录音转写，F6，F7，F8 的 complication 和可操作通知，F2 的 x
 - [ ] 需求（后续）：手表录音（AVAudioRecorder），文件交给 iPhone 转写（Apple 语音识别或 xAI `/v1/stt`），文本回传后确认再发送。验收面：D。
 
 ### F5 语音对话（手机麦克风模式）
-- [ ] 需求：手表点"开始通话"，经 WatchConnectivity 让 iPhone 建立语音会话；手表显示状态（连接中/聆听/思考/说话）、字幕摘要、静音和结束按钮。测试：`VoiceControlStateTests`。验收面：L、D。
-- [ ] 需求：iPhone 端无法启动录音时（例如 app 在后台），手表明确提示"请解锁手机或在手机上打开配套 app"，不静默失败。验收面：D（对应验证项 S-3）。
+前置闸门：S-3（§7）。F5 的验收按 S-3 的结论二选一，实现任务书要写明采用哪一套。
+
+- [ ] 公共需求：手表显示状态（连接中/聆听/思考/说话/已断开）、字幕摘要、静音和结束按钮；`voice.start`/`voice.stop`/`voice.mute` 带 `sessionId`，重复的 start/stop 不建立第二个会话、不重复写回 transcript。测试：`VoiceControlStateTests`。验收面：L、D。
+- [ ] 公共需求：iPhone 只在用户显式开始的通话期间使用后台音频，通话结束（包括 5 分钟上限、出错）立即停用音频会话。验收面：D（检查通话结束后配套 app 不再保持后台音频）。
+- [ ] 方案 A（S-3 通过时）：手表点"开始通话"，经 WatchConnectivity 唤醒 iPhone 配套 app 并在后台建立语音会话，手机保持锁屏也能通话。验收面：D，按 S-3 的测试矩阵逐项复测。
+- [ ] 方案 B（S-3 不通过时，"手机发起、手表控制"）：通话在 iPhone 上开始（打开配套 app 点开始，之后可以锁屏继续）；手表在通话进行中显示状态和字幕，提供静音、结束；手表上的"开始通话"在没有进行中的通话时显示"请在手机上开始通话"。验收面：D。
+- [ ] 需求：iPhone 端无法启动录音、配套 app 被用户划掉、或 WC 不可达时，手表明确提示原因和下一步（"请在手机上打开配套 app"），不静默失败。验收面：D。
 - [ ] 需求：单次通话设上限（默认 5 分钟），结束后把 transcript 写回 Bot 记录（沿用官方客户端的做法）。验收面：D。
 
 ### F6 麦克风路由（后续）
@@ -111,16 +123,19 @@ F4 的录音转写，F6，F7，F8 的 complication 和可操作通知，F2 的 x
 ## 6. 不变量
 
 - token、refresh token、gateway token 只存放在获取它的那台设备的 Keychain 里（iPhone 或手表），不经 WatchConnectivity 传输，不写日志，不进快照，不进仓库。
-- 写操作（发送、应答、审批）对同一个幂等 ID 最多发出一次写请求；结果不确定时只查询，不重发。
+- 任何路径都不自动重发写操作（发消息、确认答复、表单、语音开关、transcript 写回）；每一次写请求都对应用户的一次显式操作。结果不确定时只对账，不重发。各类操作的去重方式见 architecture §5.1。
+- 同一个用户操作在整个链路上只有一个 `opId`：手表发件箱、iPhone 落盘记录、服务端请求 ID 都由它派生；结果未知的操作不换路径重发。
 - 协议失效时只降级受影响的功能，并明确提示"请在手机上处理"；不猜测字段，也不改发到其他接口。
-- 不在手表或 iPhone 后台常驻；语音只在用户显式点击后开始。
+- 不在手表或 iPhone 后台常驻；只在用户显式开始的通话期间使用后台音频（单次上限 5 分钟），通话结束立即停用。
 - 不使用 grok-wear 仓库里属于 xAI 的头像设计数据。
 
-## 7. 验证项（spike，不属于 MVP 验收，结论写回 design/）
+## 7. 验证项（spike，结论写回 design/）
+
+S-3 是 F5 实现批次的**前置闸门**，必须先做；其余验证项不属于 MVP 验收。
 
 - S-1：真机上，手表在活跃音频会话期间能否建立到 `wss://api.x.ai/v1/realtime` 的 WebSocket（TN3135 限制）。
 - S-2：手表麦克风 PCM 经 `WCSession.sendMessageData` 中转到 iPhone 的端到端延迟和丢包。
-- S-3：iPhone 配套 app 被 WatchConnectivity 唤醒到后台时，能否启动录音和语音会话（`AVAudioSession` 在后台启动录音可能失败）。
+- **S-3（闸门，先做）**：手机锁屏时，能否从手表发起 iPhone 后台录音和语音会话。配套 app 声明后台音频模式，手表经 `sendMessage` 唤醒 iPhone 后尝试激活 `AVAudioSession` 并开始录音（后台启动录音可能报 `cannotStartRecording`）。测试矩阵：配套 app 未运行、已挂起、前台后锁屏、被用户从多任务里划掉，四种状态各测手机锁屏和解锁两种情况。结论：全部"锁屏"项通过才算通过，F5 采用方案 A；任一锁屏项不通过，F5 改为方案 B"手机发起、手表控制"。用 CallKit 发起呼出通话来换取后台音频属于重大取舍，不在本验证范围内，要负责人另行批准。
 - S-4：设备端 Foundation Models 生成 2–4 条候选的延迟和质量（iPhone 机型要支持 Apple Intelligence）。
 
 ## 8. 风险与回退
@@ -128,9 +143,28 @@ F4 的录音转写，F6，F7，F8 的 complication 和可操作通知，F2 的 x
 - 私有接口随时可能变化，导致功能失效；还可能不符合 xAI 的条款（[Acceptable Use Policy](https://x.ai/legal/acceptable-use-policy) 限制以 bot 方式访问和逆向服务）。负责人已接受这一风险，并限定为个人自用。回退：协议失效时降级为只读或"请在手机上处理"；备选路线见 architecture §8。
 - 账号风险：异常调用可能触发风控。缓解：只调用官方客户端会用到的操作，遵守限速，写操作不重试。
 - watchOS 网络和后台限制可能使手表直连语音不可行。缓解：手机麦克风模式是 MVP 的默认模式。
-- 构建环境：Linux 上的 Codex 云端无法编译 watchOS/iOS target。实现阶段的 App target 要在负责人的 Mac 上用 Xcode 构建，或者经批准后接入 macOS CI。
-- 侧载签名：没有付费的 Apple Developer Program 会员时，免费团队签名的有效期短、能力受限（例如 App Group），需要定期重新安装。
+- 构建环境：Linux 上的 Codex 云端无法编译 watchOS/iOS target。App target 的构建、签名和真机调试在负责人的 Mac 笔记本上用 Xcode 进行（见 §10）。
+- 侧载签名：使用免费 Personal Team，签名 7 天过期，App ID 和能力受限，见 §10。
 
 ## 9. 是否重大变更
 
 是。新建项目，涉及凭据处理、私有接口和跨设备通信。本 spec 需要独立设计评审，并经负责人本人批准后才能进入实现。实现阶段新增任何依赖（包括 xcodegen 之类的工具）要先做架构评估并获批。
+
+## 10. 构建与签名约束（负责人 2026-11-16 决定）
+
+- 构建和真机调试：在负责人的 Mac 笔记本上用 Xcode 构建 watchOS/iOS target、签名、安装到负责人的 iPhone 和 Apple Watch。纯 Swift 核心包仍可在 Linux 上 `swift test`。本轮不接 macOS CI。
+- 签名：没有付费 Apple Developer Program 会员，使用免费的 Personal Team 侧载（依据 Apple [Developer account overview](https://developer.apple.com/help/account/basics/about-your-developer-account/)）：
+  - 描述文件签发 7 天后过期，过期后 app 打不开，要回到 Mac 上重新构建、安装（iPhone 和手表 app 都要）。
+  - 最多 10 个 App ID（7 天过期），最多 3 台设备（iPhone 和手表占 2 台），每台设备最多装 3 个这样签名的 app。本项目需要 iOS app、watchOS app 两个 App ID，后续加 complication/widget 扩展会再占一个。
+  - bundle ID 保持固定：换 ID 会占新的 App ID，Keychain 里的登录信息也读不到，要重新登录。
+  - 不能用 TestFlight，也不能分发给其他人（与本项目"仅本人使用"一致）。
+- 依赖付费会员的能力及其影响（凡是实现时要用到下表以外的 capability，先在 Personal Team 下实际签名验证）：
+
+| 能力 | 免费 Personal Team | 对本项目的影响 |
+|---|---|---|
+| 远程推送（APNs） | 不可用 | 本项目本来没有自己的服务器，不依赖远程推送。新消息提醒仍靠官方 app 的通知；手表数据新鲜度靠打开手表 app 时的 `inbox.refresh` 和 iPhone 前台事件流。F8 的可操作通知只能用本地通知，后续评估时按这个前提 |
+| PushKit / VoIP 推送 | 不可用（依赖推送） | 不能靠来电式推送唤醒 iPhone；F5 方案 A 只能依赖 WatchConnectivity 唤醒，这正是 S-3 要验证的 |
+| Private Cloud Compute 受管 entitlement | 不可用（需要申请） | 不在本项目范围；F2 只用 iPhone 端 `SystemLanguageModel` 和规则模板 |
+| App Groups | 以实际签名结果为准 | MVP 不依赖：iPhone 和手表之间走 WatchConnectivity，不共享容器。后续手表 complication 扩展如需和手表 app 共享数据，要先验证；不可用时 complication 只显示静态入口 |
+| iCloud、Sign in with Apple、Associated Domains | 不可用 | 不使用。B1 登录走轮询，不需要 universal link 回调 |
+| 后台模式（音频）、Keychain | 一般可用，以实际签名结果为准 | F5 需要后台音频；S-3 必须用 Personal Team 签名的构建在真机上测 |

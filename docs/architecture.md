@@ -44,7 +44,7 @@
 | `Bootstrap` | 获取 gateway 连接信息（Bot 所在环境），定期刷新，不阻塞读路径 | 失败时只用服务端 harness 的接口；两边都失败则只读快照 |
 | `BotClient` | Bot 列表、主 Bot 识别、读对话尾部；按 harness 分流：sandbox Bot 走 gateway 操作（list/transcript/send/respondToWidget/submitUserForm/resolveAutoReviewApproval），服务端 Bot 走后端 RPC（List/Send/Respond/Submit/ResolveAutoReviewApproval、GetSendStatus） | 单个操作失效时只禁用对应按钮，显示"请在手机上处理" |
 | `EventStream` | 前台时订阅事件流（keep-alive 超时判定断线、指数退避）；断流后重新读对话，不信任可能漏掉的事件 | 退回到定时拉取（只在 app 前台时） |
-| `Outbox` | 写操作幂等：客户端 nonce、单次写请求；应答丢失时调发送状态查询，直到 Sent / NotSent / 放弃 | 结果未知时标"未确认"，只能由用户手动重试，并且沿用同一个 nonce |
+| `Outbox` | 按操作类型防重复（§5.1）：发消息用由 `opId` 派生的 nonce，结果未知时按 harness 对账（服务端 Bot 查发送状态，gateway Bot 读对话按 nonce 核对）；确认答复和表单写前重读条目状态；写之前先落盘（§5.2） | 结果未知时标"未确认"；只有对账确认没送达或对账放弃后，才允许用户手动重试，沿用同一个 `opId` |
 | `ProtocolGuard` | 解析时做严格校验：必需字段、类型、枚举；识别"版本过旧"类拒绝；记录不含内容的诊断信息 | 命中后整体进入 `degraded(feature)`，在设置页显示协议状态 |
 | `VoiceCredential` / `VoiceSession` | 向 Grok Bot 换取短期语音凭证，连 xAI Realtime（`xai-client-secret.` 子协议，与 [xAI 官方文档](https://docs.x.ai/developers/model-capabilities/audio/ephemeral-tokens) 一致），处理 `session.update`、音频追加、转写和音频增量、断线重拨 | 凭证接口失效：语音功能禁用，提示用官方 app 通话 |
 
@@ -56,12 +56,13 @@
 - 手表在 F7 里**单独登录**：手表显示二维码，在手机浏览器批准；token 只存手表 Keychain。**不经 WatchConnectivity 传送 token**，避免两端共用 refresh token 造成轮换冲突，也缩小泄露面。
 - WC 快照只含展示用的数据：Bot 名、问题文本摘要、选项、候选回复、卡片。快照里不含 token 和 gateway 地址。
 - 日志里不记录消息正文、token 或主机名，只记录操作名、状态码类别和耗时。
+- 手表发件箱和 iPhone 去重表落在各自设备的 app 沙盒里，按敏感数据对待：只存操作类型、目标条目 ID、回复文本和状态，不存 token；登出时一并清空。
 
 ## 5. WatchConnectivity 消息协议（v1）
 
 官方依据：[`sendMessage`](https://developer.apple.com/documentation/watchconnectivity/wcsession/sendmessage(_:replyhandler:errorhandler:)) 从手表活跃时调用，会**在后台唤醒 iOS app**；反过来，iPhone 唤醒不了手表。[`isReachable`](https://developer.apple.com/documentation/watchconnectivity/wcsession/isreachable) 决定能不能做实时消息。[`updateApplicationContext`](https://developer.apple.com/documentation/watchconnectivity/wcsession/updateapplicationcontext(_:)) 只保留最新状态，适合放快照。
 
-信封：`{ "v": 1, "id": "<uuid>", "type": "<type>", "sentAt": <ms>, "body": {…} }`。手表收到更高版本的消息时，回 `error.version`，提示升级配套 app。
+信封：`{ "v": 1, "id": "<uuid>", "type": "<type>", "sentAt": <ms>, "body": {…} }`。信封 `id` 只标识这一次投递（每次投递都新生成）；用户操作由 body 里的 `opId` 标识，重投时不变。收到更高版本的消息时，回 `error.version`，提示升级发出方以外的那一端（手表收到更高版本，提示更新手表 app；iPhone 收到更高版本，提示更新配套 app）。application context 和 `transferUserInfo` 没法回 reply，版本不匹配时只在本端显示提示。
 
 | 方向 | type | body 主要字段 | 通道 |
 |---|---|---|---|
@@ -70,17 +71,56 @@
 | 手表→手机 | `widget.respond` / `widget.dismiss` | `botId, entryId, values[], opId` | sendMessage |
 | 手表→手机 | `approval.resolve` | `botId, approvalId, decision(allow/deny), opId` | sendMessage |
 | 手表→手机 | `form.submit` / `form.dismiss` | `botId, formId, fields{}, opId` | sendMessage |
-| 手表→手机 | `voice.start` / `voice.stop` / `voice.mute` | `botId, mic(auto/phone/watch)` | sendMessage |
+| 手表→手机 | `voice.start` / `voice.stop` / `voice.mute` | `botId, sessionId, mic(auto/phone/watch), muted?` | sendMessage |
 | 手表→手机 | `audio.up`（后续 F6） | 二进制 PCM 帧和序号 | sendMessageData |
-| 手机→手表 | `op.result` | `opId, result(accepted/rejected/unknown), reason?` | reply 或 sendMessage |
-| 手机→手表 | 快照 | `inbox[], latestMessage, suggestions[], cards[], authState, protocolState, generatedAt` | updateApplicationContext |
-| 手机→手表 | `voice.state` | `state, mic, caption?` | sendMessage |
+| 手机→手表 | `op.ack` | `opId, persisted:true` | 对应 sendMessage 的 reply |
+| 手机→手表 | `op.result` | `opId, result(accepted/rejected/unknown), reason?, finishedAt` | transferUserInfo（保证送达） |
+| 手机→手表 | 快照 | `inbox[], latestMessage, suggestions[], cards[], recentOps[], voice?, authState, protocolState, generatedAt` | updateApplicationContext |
+| 手机→手表 | `voice.state` | `sessionId, state, mic, caption?` | sendMessage（手表不可达时丢弃，快照里的 `voice` 字段兜底） |
 | 手机→手表 | `audio.down`（后续 F6） | 二进制 PCM | sendMessageData |
 
 规则：
-- `opId` 由手表生成，iPhone 把它映射成 Outbox 的客户端 nonce，同一个 `opId` 只执行一次（持久化去重表，保留 24 h）。
-- 手机不可达时：MVP 显示"手机不可用"，并保留草稿；F7 上线后改走 DirectClient。
+- 手机不可达时：MVP 把操作留在手表发件箱（`queued`），显示"手机不可用"，手机恢复可达后由用户点一次"发送"再投递；F7 上线后，只有从未交给手机（`queued`）的操作才能改走 DirectClient。
 - 快照大小有上限（例如 64 KiB）。候选和卡片截断后要标明。
+
+### 5.1 防重复规则（按操作类型）
+
+总原则：任何路径都**不自动重发写请求**；每一次写请求都对应用户的一次显式操作（首次点击或手动重试）。自动流程只做对账（读）。后端去重能力因操作类型而异，所以手动重试的条件也分开定：
+
+| 操作 | 后端去重能力 | 结果未知时的对账 | 手动重试规则 |
+|---|---|---|---|
+| 发消息（快速回复 F2、卡片 F3、听写 F4） | 服务端按客户端 nonce 只保留一份（grok-wear 记录官方客户端同一 nonce 最多发 3 次） | 服务端 Bot：发送状态查询，约每 2 s 一次，60 s 后放弃；gateway Bot：读对话尾部，找到带同一 nonce 且文本一致的用户条目即视为已送达 | 只有对账结果为"未送达"或对账放弃后才显示"重试"；沿用同一个 `opId` 和 nonce，文本不可改（改文本就是新操作、新 `opId`）；同一操作最多 3 次写请求 |
+| 确认答复（widget 单选/多选/dismiss、Allow/Deny） | 没有 nonce，靠条目状态：widget 的已答值或已 dismiss，approval 的 `status`（pending/approved/denied/expired…） | 重读该条目 | 写之前和每次手动重试之前先重读条目；已处理（不论是不是本 app 处理的）就直接显示结果、不再写；已过期显示"已过期"；仍是 pending 才允许重试 |
+| 表单（user-form 提交/跳过） | 没有 nonce，靠表单条目的处理结果（submitted/dismissed） | 重读该条目 | 同确认答复；对账确认仍待处理才允许重试，重试沿用手表上原来填写的值 |
+| 语音开关（`voice.start`/`stop`/`mute`） | 不是服务端写请求；`setVoiceCallPresence` 一类上线/下线调用按目标状态设置 | 读 iPhone 当前会话状态 | 按"目标状态 + `sessionId`"处理（电平触发）：同一 `sessionId` 的重复 start 返回现有会话，重复 stop 直接确认已结束；transcript 写回和通话后 handoff 属于写操作，按发消息规则处理，每个 `sessionId` 只由会话持有方写一次 |
+
+### 5.2 结果送达链路（防丢失）
+
+```text
+手表                                   iPhone                              服务端
+用户点击 → 生成 opId
+→ 写入手表发件箱 queued（落盘）
+→ sendMessage(op, opId) ───────────►  1. 查去重表：已有 opId → 不写，直接回 ack，
+                                         有结果就重新排队 transferUserInfo
+                                      2. 没有 → 落盘 {opId, nonce, kind, state=pending}
+                                      3. beginBackgroundTask
+   ◄────── reply: op.ack ──────────   4. 回 op.ack（已落盘）
+handedToPhone（落盘）                  5. 发写请求（带派生 nonce）────────────► 
+                                      6. 得到结果或对账结论 → 去重表 state=final
+   ◄── transferUserInfo: op.result ── 7. 排队 op.result；同时写进快照 recentOps
+accepted / rejected / unknown（落盘）
+```
+
+- **手表持久发件箱**：状态 `queued → handedToPhone → accepted / rejected / unknown`，每次状态变化先落盘。WC 报错（发送超时、手机不可达）时，手表分不清"没送达"和"已执行但回执丢了"，所以不换 `opId`，状态保持 `queued`（没收到 ack）或 `handedToPhone`（收到了 ack），由用户用同一个 `opId` 重投。iPhone 端的去重表保证重投不会产生第二次写。
+- **iPhone 先落盘**：步骤 2 必须在步骤 5 之前完成并成功；落盘失败就回 `op.result(rejected, reason=storage)`，不发写请求。iPhone 重启后扫描 `state=pending` 的记录：只做对账（§5.1），不再写；对账有结论后照常经 `transferUserInfo` 回传。去重表保留 7 天。
+- **服务器请求 ID 派生**：发消息的客户端 nonce 直接取 `opId`（手表生成的 UUID v4，小写带连字符，与官方客户端 nonce 格式一致）。这样中转路径和后续 F7 直连对同一操作落到同一个服务端 nonce。确认答复和表单没有服务器请求 ID，按条目状态去重（§5.1）。规定：状态为 `handedToPhone` 的操作不得改走 DirectClient 新发；只有 `queued`（手机从没确认收到）的操作才可以由用户选择改走直连，而且仍用同一个 nonce。
+- **最终结果经 `transferUserInfo` 回传**：[`transferUserInfo(_:)`](https://developer.apple.com/documentation/watchconnectivity/wcsession/transferuserinfo(_:)) 会排队并在对端可用时按顺序送达，手表放下手腕、app 被挂起都不会丢。`sendMessage` 的 reply 只用来回 `op.ack`；从 iPhone 调 `sendMessage` 唤醒不了手表，所以最终结果不走 `sendMessage`。同时把最近 20 条操作结果放进快照 `recentOps`，作为第二条通道；手表按 `opId` 合并，重复结果只更新一次。
+- **后台时间**：iPhone 被唤醒后先 `beginBackgroundTask`；冷路径（刷新 token、gateway bootstrap、HTTP 超时）可能超过 reply 时限，所以 ack 在落盘后立即回，不等网络结果。后台时间用完还没有结果时，记录保持 pending，下次配套 app 运行时继续对账。
+
+### 5.3 语音开关与会话标识
+
+- `sessionId` 由发起通话的一端生成（方案 A 时是手表，方案 B 时是 iPhone），iPhone 是唯一的会话持有方。
+- 手表只发目标状态，不假设执行成功；界面以 `voice.state` 和快照里的 `voice` 字段为准。
 
 ## 6. 麦克风路由状态机（F6；MVP 只启用 PhoneMic）
 
@@ -102,7 +142,7 @@ Selecting:
       ¬phoneReachable ∧ watchOnline ∧ watchDirectWS            → WatchMicDirect
   auto ∧ phoneReachable ∧ phoneCanRecord ∧ ¬phoneAudioBusy     → PhoneMic
   否则                                                         → Unavailable（给出原因）
-PhoneMic      ──phone 失联──► 尝试 WatchMicDirect，否则 Ending
+PhoneMic      ──WC 失联──► 保持（手机上的会话继续，手表只显示"已断开"；不在手表另建会话）
 WatchMicRelay ──phone 失联──► 尝试 WatchMicDirect，否则 Ending
 WatchMicDirect──socket 被系统拒──► 记 watchDirectWS=false → Selecting
 任意 ──用户切换麦克风──► Switching（不重建 Realtime 会话，只换音频端点；会话由 iPhone 持有时）
@@ -154,4 +194,13 @@ WatchMicDirect──socket 被系统拒──► 记 watchDirectWS=false → Sel
 - Linux 上的 Codex 云端**编译不了** watchOS/iOS target，只能负责 `GrokBotWatchCore` 纯 Swift 包和 `swift test`。
 - App target（watchOS、iOS）要在负责人的 Mac 上用 Xcode 构建、签名、侧载和真机调试；也可以经批准后用 macOS CI。
 - 本轮不加 CI。新增 `.github/workflows/**` 属于政策文件变更，要另行批准。
-- 签名：个人自用侧载。付费开发者会员可以用 App Group 和更长的描述文件有效期；免费团队签名有效期短，能力也受限（具体见 [Compare memberships](https://developer.apple.com/support/compare-memberships/)）。
+- 构建和真机调试在负责人的 Mac 笔记本上进行（Xcode 构建、签名、安装到负责人的 iPhone 和 Apple Watch）。
+- 签名：使用免费 Personal Team 侧载。描述文件 7 天过期，要重新构建安装；App ID 最多 10 个、设备最多 3 台、每台设备最多 3 个 app；远程推送、PushKit、iCloud、Sign in with Apple、Associated Domains 和受管 entitlement 不可用。各项对本项目的影响见 spec §10。设计上不依赖任何需要付费会员的能力；用到新的 capability 前，先在 Personal Team 下实际签名验证。
+
+## 11. F5 语音对话与后台音频（闸门 S-3）
+
+- iPhone 配套 app 声明后台音频模式，但只在用户显式开始的通话期间激活音频会话，通话结束（用户结束、5 分钟上限、出错）立即停用。不用后台音频保活，不播放静音音频。
+- 方案 A（S-3 通过）：手表 `voice.start` 经 `sendMessage` 唤醒 iPhone → iPhone 激活音频会话、开始录音、换取语音凭证、连 Realtime → `voice.state` 回手表。
+- 方案 B（S-3 不通过）："手机发起、手表控制"。通话只能在 iPhone 前台开始，开始后可以锁屏继续；手表负责静音、结束和显示字幕。手表在没有进行中的通话时，"开始通话"按钮显示"请在手机上开始通话"。
+- 已知限制：用户从多任务里划掉配套 app 后，WatchConnectivity 一般不会再把它拉起来；这种情况在两种方案下都提示"请在手机上打开配套 app"。
+- 用 CallKit 发起呼出通话来获得后台音频是重大取舍，不在本轮设计里，要负责人另行批准。

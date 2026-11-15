@@ -6,7 +6,7 @@ Apple Watch 上的 Grok Bot 轻量伴侣，配合官方 Grok Bot iPhone app 使�
 
 ## 状态
 
-规格 v0 设计评审中，还没有实现代码。
+规格 v0.1 设计复评中（已按首轮评审修订防重复、防丢失和 F5 闸门），还没有实现代码。
 
 ## 功能（与 [docs/feature-map.md](docs/feature-map.md) 一致）
 
@@ -15,9 +15,9 @@ Apple Watch 上的 Grok Bot 轻量伴侣，配合官方 Grok Bot iPhone app 使�
 - **F2 智能快速回复**：iPhone 根据 Bot 的最新消息生成 2–4 条候选，手表一点即发。
 - **F3 自定义常用回复卡片**：在 iPhone 上编辑，在手表上使用。
 - **F4 语音输入兜底**：系统听写。
-- **F5 语音对话开关**：由 iPhone 跑语音，手表负责开始、结束和静音。
+- **F5 语音对话开关**：由 iPhone 跑语音，手表负责开始、结束和静音。手机锁屏时能否从手表发起通话要先验证（S-3）；不行就改为在手机上开始、手表控制。
 - **F8 收件箱**：列出主 Bot 待你处理的问题。
-- 基础：B1 iPhone 登录，B2 私有接口客户端，B3 WatchConnectivity 协议。
+- 基础：B1 iPhone 登录，B2 私有接口客户端，B3 WatchConnectivity 协议（手表持久发件箱，结果保证回传，写操作不自动重发）。
 
 后续：F4+ 录音转写，F6 麦克风智能路由，F7 手表直连降级，F8+ complication 和可操作通知。
 
@@ -27,7 +27,9 @@ Apple Watch 上的 Grok Bot 轻量伴侣，配合官方 Grok Bot iPhone app 使�
 
 ## 构建
 
-实现阶段需要 macOS 和 Xcode（watchOS、iOS target）。纯 Swift 核心包可以在 Linux 上跑 `swift test`。本仓库暂时没有 CI。
+watchOS、iOS target 在负责人的 Mac 笔记本上用 Xcode 构建和真机调试；纯 Swift 核心包可以在 Linux 上跑 `swift test`。本仓库暂时没有 CI。
+
+签名用免费 Personal Team 侧载：描述文件 7 天过期，要重新构建安装；App ID、设备数量和可用能力都有限制，远程推送等依赖付费会员的能力不可用。详见 [docs/spec.md](docs/spec.md) §10。
 
 ## 文档
 
