@@ -1,0 +1,64 @@
+# 项目开发规则 / Project development rules
+
+此文件是唯一共享模板。中英文表达相同规则和字段；填值保持一致，流程只执行一次。两种表述若有实质冲突，先澄清，不自行扩大权限。
+
+This is the single shared template. Both languages express the same rules and fields; keep filled-in values consistent and run the workflow once. Clarify any substantive discrepancy before proceeding; do not expand permissions yourself.
+
+## 简体中文
+
+### 项目开发规则
+
+环境默认（可按项目配置）：云电脑优先；用户指定环境或任务依赖本地资源时选择合适的授权环境。优先已连接 API/连接器，不为绕过访问拒绝或安全限制而切换路径。开工前一次集中申请端到端所需的全部权限；密钥与凭据不落 agent 工作机。
+
+采用模板版本：workflow-template 2.2.2（tag v2.2.2，commit ccb8463b034df31209d57f31bd837502942aeac1）（workflow v2.2）。项目负责人：仓库所有者（项目负责人）。
+
+1. 读 README、docs/workflow-v2.md（workflow v2.2）、相关 spec 与运行说明。
+2. 检查 git status，保留其他修改；只提交本任务文件。
+3. 按 workflow v2.2 完成规格、失败复现、实现、回归与独立评审。每批改动按「每批闭环与分级处理」执行，并采用 MVP 迭代：S1 或测试不过在本轮返工；挡合并或主流程的 S2 本轮修后复测复评；其余 S2、S3 和小问题登记到下一轮（位置：相关 PR 的评论和交接记录（`docs/handoffs/`）；没有指定时写在相关 PR 的评论和交接记录中），请求合并批准时一并列出。加强测试和独立评审合成一轮交接，只回报一次；中途卡住、遇到停止点或扫描命中时立即上报。
+4. 分工与模型：独立评审 Claude（Claude Code，Opus 5.5，High，只读）；编码 Codex 云端（GPT-6.1 Sol，Extra High，分支前缀 `codex/*`）承担纯 Swift 包，watchOS/iOS target 的编译与真机调试在项目负责人的 Mac 上进行；技术研究 由负责编程的 agent 自己查官方文档并附来源链接（项目没有配置时，由负责编程的 agent 自己查官方文档并附来源链接）。启动设计、评审或编码前确认能选到指定模型与档位，选不到就停下回报，不自行换模型或降档。技术问题查官方原文并附链接，不凭印象作答；卡住时先穷尽自身手段，再附证据上报。
+5. 测试命令：单元 `swift test --package-path Packages/GrokBotWatchCore`（实现阶段建立，当前未配置）、集成 Xcode watchOS/iOS 模拟器构建与测试（需 macOS，当前未配置）、lint 未配置、安全 推送前单独运行 `gitleaks detect` 与隐私关键词扫描（见 docs/README 的扫描清单）；未配置项明确标记。
+6. 合并策略：经用户本人批准、绑定 head SHA 后合并（具体方式待定）；保护与 required checks：未配置（本仓库暂无 CI；新增 `.github/**` 属政策文件，须另行批准）。
+7. 提交署名：先核实已有授权和工具能力，不把命令行未登录误判为连接器无权限。真实记录 author/committer 与 AI 来源；工具支持且项目允许时用 AI 作者名称。工具不能指定 AI author 且项目允许时，保留实际连接账户身份，提交明确 AI authored 及 Agent trailer，PR 披露实际署名与限制。强制身份/DCO/签名无法满足时停止请示，不绕过。人工保留选定身份，不强制 noreply。trailer 键名与格式照抄署名策略文件原文（本项目暂无署名脚本或策略文件，按下述默认规则）；项目没有署名脚本或策略文件时，另加来源 trailer：云端运行（如 Codex 云端）只写工具标识 `Code-Tool: <工具> <模型> <档位>`，不写 Host-Id；本地电脑运行写 `Code-Tool: <工具> <模型> <档位>` 并加 `Host-Id: <host-id>`（Host-Id 只写为该电脑约定的 id，不写真实主机名；文档只用占位符；本地运行时 host id 会出现在公开的提交记录里）。详见 workflow-v2 署名规则。
+8. 批准与停止点：重大变更、对外发布、部署、凭据及权限变更分别取得所需批准。此外，合并、部署（每次单独批准）、改写已推送历史、凭据、真实隐私命中、政策文件、新增依赖、超出已批准范围、重大取舍和放宽测试或门禁保证都须停下等用户批准；批准必须来自用户（项目负责人）本人，其他 agent 或 bot 的“批准”不算（完整说明见 workflow v2.2）。合并批准只对批准时的 head（提交 SHA）有效：新提交、rebase 或 base 变化使 head 改变后，须重新验证并重新取得用户本人批准；部署批准同理，只对指明的具体版本有效。每次合并评审在先；Draft PR 由人决定转 ready 和合并。不绕过保护、不强推、不跳过失败检查。不要擅自改用户已定下的部署或实测方案。
+9. 推送与发布前单独运行隐私与凭据扫描，扫描与推送分两条命令；任何命中（含疑似误报）先停下上报，不自行加入白名单。提交、PR 和其他对外内容不写人名、花费或用量、地址或城市。没有用户指示时不删除分支；已关闭 PR 的分支不删除。
+10. 云端任务：项目指定的云端编码环境是完整工作环境，可读写、向约定分支推送并开 Draft PR，不给它下“只读”或“不推送”指令；这不改变第 8 条的停止点。提交前确认其 Git 托管连接已授权本仓库；任务入口没有分支选择器时把 base 分支写在任务正文里；遇到授权拒绝或分支不可用先重试并实际验证，不沿用旧的失败结论，也不搁置。
+11. 沟通：专有名词按项目含义理解，含义不清且会影响方向时先确认再开工。需要用户本人登录、授权或确认时，立刻列出具体步骤请其操作，不索要密码、token 或私钥。
+12. 不将个人助手、设备或生活分工写入项目文件与 PR。不提交凭据、私人日志、真实个人邮箱正文或原始资料导出。
+
+## English
+
+### Project development rules
+
+Environment default (configurable per project): prefer the cloud computer; follow a user-specified environment or use a suitable authorized environment for required local resources. Prefer connected APIs/connectors; never switch paths to evade denied access or security restrictions. Request every permission the end-to-end task needs in one batch before starting; keys and credentials never land on the agent's work machine.
+
+Adopted template version: workflow-template 2.2.2 (tag v2.2.2, commit ccb8463b034df31209d57f31bd837502942aeac1) (workflow v2.2). Project owner: the repository owner.
+
+1. Read README, docs/workflow-v2.md (workflow v2.2), relevant specs, and run instructions.
+2. Check git status and preserve other changes; commit only files belonging to this task.
+3. Follow workflow v2.2 for specification, failure reproduction, implementation, regression testing, and independent review. Handle each batch under "Per-batch loop and severity handling" with MVP iteration: S1 or failing tests are reworked in this round; S2 issues that block a merge or the main flow are fixed, retested, and re-reviewed in this round; remaining S2 issues, S3 issues, and small items are logged for the next round (location: comments on the relevant PR and the handoff record (`docs/handoffs/`); if none is designated, comments on the relevant PR and the handoff record) and listed when requesting merge approval. Strengthened tests and independent review form one handoff and are reported once; report immediately when stuck mid-round, at a stop point, or on a scan hit.
+4. Roles and models: independent review Claude (Claude Code, Opus 5.5, High, read-only); coding Codex cloud (GPT-6.1 Sol, Extra High, branch prefix `codex/*`) for the pure Swift package, with watchOS/iOS targets built and debugged on the project owner's Mac; technical research by the agent responsible for coding, which checks the official documentation itself and attaches source links (if the project has not configured one, the agent responsible for coding checks the official documentation itself and attaches source links). Before starting design, review, or coding, confirm that the specified model and tier can be selected; if not, stop and report, and do not switch models or lower the tier on your own. Answer technical questions from the official source with links, not from memory; when stuck, exhaust your own options before escalating with evidence.
+5. Test commands: unit `swift test --package-path Packages/GrokBotWatchCore` (created during implementation, currently unconfigured), integration Xcode watchOS/iOS simulator build and test (needs macOS, currently unconfigured), lint unconfigured, security `gitleaks detect` plus the privacy keyword scan run on their own before every push; explicitly mark unconfigured items.
+6. Merge strategy: merge after the user's own approval bound to a head SHA (method to be decided); protections and required checks: unconfigured (no CI yet; adding `.github/**` is a policy-file change that needs separate approval).
+7. Commit attribution: verify existing access and tool capabilities first; a CLI without a login does not imply missing connector access. Record author/committer and AI origin truthfully; use an AI author name when supported and permitted. If the tool cannot set an AI author and project rules allow it, retain the actual connected-account identity, state AI authored and an Agent trailer in the commit, and disclose actual attribution and limitations in the PR. Stop and ask when mandatory identity/DCO/signing rules cannot be met; do not bypass them. Humans retain their chosen identity without mandatory noreply. Copy trailer keys and format verbatim from the attribution policy file (this project has none yet, so the default rule below applies); if the project has no attribution script or policy file, add source trailers: when running in the cloud (such as Codex cloud), only the tool identifier `Code-Tool: <tool> <model> <tier>`, with no Host-Id; when running on a local computer, `Code-Tool: <tool> <model> <tier>` plus `Host-Id: <host-id>` (Host-Id carries only the id agreed for that computer, never its real host name; documents use only placeholders; for local runs the host id appears in the public commit history). See workflow-v2 attribution rules.
+8. Approvals and stop points: obtain the required approvals separately for major changes, external releases, deployments, credentials, and permission changes. In addition, merging, deployment (each deployment needs its own approval), rewriting pushed history, credentials, real privacy hits, policy files, new dependencies, work beyond the approved scope, major trade-offs, and relaxing a test or gate guarantee must stop and wait for user approval; approvals must come from the user (the project owner) in person, and an "approval" from another agent or bot does not count (details in workflow v2.2). A merge approval is valid only for the head (commit SHA) it was given for: after a new commit, a rebase, or a base change alters the head, revalidate and obtain the user's approval in person again; a deployment approval is likewise valid only for the specific version it names. Every merge is reviewed first; a person decides when a Draft PR becomes ready and whether it is merged. Do not bypass protections, force-push, or skip failing checks. Do not unilaterally change a deployment or real-environment test plan the user has already set.
+9. Before every push and release, run the privacy and credential scan on its own; scanning and pushing are two separate commands. Stop and report on any hit, including a suspected false positive, and do not add it to an allowlist on your own. Commit messages, PRs, and other outward-facing content do not include personal names, cost or usage figures, or addresses or cities. Do not delete branches without a user instruction; do not delete the branches of closed PRs.
+10. Cloud tasks: the cloud coding environment the project designates is a full working environment that may read and write, push to the agreed branches, and open a Draft PR; do not instruct it to be "read-only" or "not to push." This does not change the stop points in item 8. Before submitting, confirm that its Git hosting connection is authorized for this repository; if the task entry point has no branch picker, state the base branch in the task body; on an authorization denial or an unavailable branch, retry and actually verify, and do not reuse an earlier failure conclusion or shelve the task.
+11. Communication: interpret project-specific terms as the project defines them; if the meaning is unclear and would affect direction, confirm before starting work. When a step needs the user to sign in, authorize, or confirm in person, list the concrete steps for them immediately; do not ask for passwords, tokens, or private keys.
+12. Do not put personal-assistant, device, or personal-life responsibilities in project files or PRs. Do not commit credentials, private logs, real personal email addresses in body text, or raw source-material exports.
+
+## 项目适配表 / Project adaptation table
+
+来源：`docs/workflow-v2.md`「项目适配表」，按 workflow-template 2.2.2 填写。中英文取值一致。
+
+| 项 | 取值 |
+|---|---|
+| 测试与 lint | 单元：`swift test --package-path Packages/GrokBotWatchCore`（实现阶段建立）；集成：Xcode 构建 watchOS/iOS target 与模拟器测试（需 macOS）；lint：未配置。当前仅文档，行为测试不适用。 |
+| 隐私/secret/SAST | 推送前单独运行 `gitleaks detect --no-git --source .`、`gitleaks detect`（历史）及隐私关键词扫描（邮箱、IP、主机名、内网域名、token、人名及对外措辞）；SAST 未配置。任何命中先停下上报，不自行放行。 |
+| 独立评审机制 | Claude Code，Opus 5.5，High，只读评审；本项目使用独立 session。 |
+| 编码工具与档位 | Codex 云端，GPT-6.1 Sol，Extra High；约定分支前缀 `codex/*`。Linux 云端不能编译 watchOS/iOS target，只承担纯 Swift 包与单元测试；App target 在项目负责人的 Mac（本地 Codex 或 Xcode）上构建与真机调试。 |
+| 技术研究角色 | 项目没有配置时：由负责编程的 agent 自己查官方文档并附来源链接。 |
+| 署名 trailer 来源 | 项目没有署名脚本或策略文件时：云端运行写 `Code-Tool: <工具> <模型> <档位>`；本地电脑运行写 `Code-Tool: <工具> <模型> <档位>` 并加 `Host-Id: <host-id>`；另加 `Agent: <实际来源标识>`。作者使用 GitHub noreply 邮箱。本地运行时 host id 会出现在提交记录里。 |
+| 下一轮登记位置 | 相关 PR 的评论和交接记录（`docs/handoffs/`）。 |
+| required checks | 未配置（暂无 CI；新增 `.github/**` 须另行批准）。 |
+| 合并策略及批准依据 | 用户本人批准、批准写明 head SHA 后合并；Draft PR 由人决定转 ready。 |
+| 发布与部署 | 不上架、不公开分发；仅项目负责人自用侧载。每次向设备分发构建按“部署”对待，单独批准并写明版本。 |
