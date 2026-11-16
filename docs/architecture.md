@@ -20,7 +20,9 @@
 └────────────────────────────────────────────────────────────┘
 ```
 
-共享代码放在纯 Swift 包 `Packages/GrokBotWatchCore`，它不依赖 UIKit 或 WatchKit，可以在 Linux 上 `swift test`。内容包括：协议模型、信封编解码、Outbox 状态机、ProtocolGuard、MicRouter 状态机、建议规则引擎。
+共享代码放在纯 Swift 包 `Packages/GrokBotWatchCore`，它不依赖 UIKit 或 WatchKit，可以在 Linux 上 `swift test`。第一批实现包括 `AuthClient`、`BotClient`、`ProtocolGuard`、`EnvelopeCodec`、`WatchOutbox`、`PhoneRelay`、`Outbox`、`SuggestionEngine` 和 `InboxBuilder`。麦克风路由留到 F6。
+
+核心包通过 `PKCEHasher`、`AuthTransport`、`TokenStore`、`HTTPTransport`、`WCChannel` 和 `SuggestionModel` 使用平台能力。当前测试以 fake 实现这些协议；`HTTPTransport` 的请求模型列出允许的操作，实际适配器接入时负责校验私有接口的原始响应并映射为核心模型。
 
 ## 2. 分工
 

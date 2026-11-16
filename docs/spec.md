@@ -61,6 +61,8 @@ F4 的录音转写，F6，F7，F8 的 complication 和可操作通知，F2 的 x
 
 验收面分三种：L 表示本地单元测试（纯 Swift 包，可以在 Linux 或 macOS 上跑 `swift test`）；S 表示 Xcode 模拟器（需要 macOS）；D 表示真机（负责人的 iPhone 和 Apple Watch）。模拟器总是放行低层网络，所以凡是涉及网络限制的项都必须在真机上验收。
 
+第一批纯逻辑实现的状态见 [功能地图](feature-map.md)。各项验收仍按对应的 L、S 和 D 验收面执行。
+
 ### B1 登录
 - [ ] 需求：iPhone 发起浏览器授权（PKCE，verifier 只在本机生成和保存）。测试：`AuthFlowTests`。输入：模拟的授权轮询响应。预期：token 写入 Keychain（`ThisDeviceOnly`，不同步），日志里不出现 token。验收面：L、D。
 - [ ] 需求：刷新的结果不确定时不自动重试，状态转为"需要重新登录"。测试：`AuthRefreshTests`。验收面：L。
