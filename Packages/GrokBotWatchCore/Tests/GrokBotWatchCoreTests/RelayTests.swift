@@ -108,6 +108,8 @@ import Testing
         })
         #expect(output?.reason == .storage)
         #expect(output?.writesDone == 0)
+        let rejected = try #require(output)
+        #expect(await phone.recentResults() == [rejected])
         #expect(await http.requests.isEmpty)
     }
 
@@ -143,7 +145,7 @@ import Testing
         _ = try await original.enqueue(messageAttempt().payload, opID: exampleID)
         #expect(try store.load().first?.state == .queued)
         let offline = TestWC(acknowledge: false) {
-            #expect(try? store.load().first?.state == .sentNoAck)
+            #expect((try? store.load().first?.state) == .sentNoAck)
         }
         await #expect(throws: TestFailure.disconnected) { try await original.deliver(exampleID, through: offline) }
         let reopened = try WatchOutbox(store: store)
@@ -155,7 +157,7 @@ import Testing
         let first = try EnvelopeCodec.decode(offlineData)
         let second = try EnvelopeCodec.decode(onlineData)
         #expect(first.id != second.id)
-        #expect(first.message == .write(messageAttempt()))
+        #expect(first.message == WCMessage.write(messageAttempt()))
         #expect(second.message == first.message)
         #expect(await reopened.record(for: exampleID)?.state == .handedToPhone)
     }
@@ -172,6 +174,21 @@ import Testing
 }
 
 @Suite struct ResultDeliveryTests {
+    @Test func persistedResultIsAvailableInBothDeliveryChannels() async throws {
+        let http = try TestHTTP([response(DeliveryStatus.accepted)])
+        let store = TestStore<RelayRecord>()
+        let channel = TestWC()
+        let phone = try relay(transport: http, store: store, wc: channel)
+        _ = try await phone.receive(messageAttempt(), for: exampleBot)
+
+        let userInfo = try #require(await channel.results.first)
+        #expect(try EnvelopeCodec.decode(userInfo).message == .result(result(.accepted)))
+        let reopened = try relay(transport: http, store: store, wc: channel)
+        try await reopened.publishSnapshot(InboxSnapshot(generatedAt: exampleTime))
+        let context = try #require(await channel.snapshot)
+        #expect(try EnvelopeCodec.decode(context).message == .snapshot(InboxSnapshot(recentOps: [result(.accepted)], generatedAt: exampleTime)))
+    }
+
     @Test func unknownMayAdvanceToAccepted() async throws {
         let watch = try WatchOutbox(store: TestStore<WatchRecord>())
         _ = try await watch.enqueue(messageAttempt().payload, opID: exampleID)

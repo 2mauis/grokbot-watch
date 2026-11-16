@@ -22,6 +22,19 @@ import Testing
         #expect(try EnvelopeCodec.decode(EnvelopeCodec.encode(error)) == error)
     }
 
+    @Test func phoneRepliesWithSupportedVersionWithoutADispatch() async throws {
+        let http = TestHTTP()
+        let phone = try relay(transport: http, store: TestStore<RelayRecord>())
+        let future = Data(#"{"v":2,"type":"future","body":null}"#.utf8)
+        try await phone.receiveMessage(future, resolveBot: { _ in
+            Issue.record("An unsupported envelope reached bot resolution")
+            return nil
+        }, reply: { data in
+            #expect((try? EnvelopeCodec.decode(data))?.message == .versionError(supportedVersion: 1))
+        })
+        #expect(await http.requests.isEmpty)
+    }
+
     @Test func writeRequiresAttemptAndKnownType() throws {
         let data = Data(#"{"v":1,"id":"c05944d2-25ba-45ff-8ba6-112233445566","type":"reply.send","sentAt":0,"body":{"opId":"c05944d2-25ba-45ff-8ba6-112233445566","botId":"bot-1","text":"Okay","source":"suggestion"}}"#.utf8)
         #expect(throws: EnvelopeCodecError.invalidEnvelope) { try EnvelopeCodec.decode(data) }
@@ -89,7 +102,7 @@ private struct FakeSuggestionModel: SuggestionModel {
     @Test func filtersUnsafeDuplicateOrOverlongModelOutput() async {
         let engine = SuggestionEngine(model: FakeSuggestionModel(output: [
             "  Continue ", "continue", "Please explain", String(repeating: "x", count: 41),
-            "https" + "://" + "example.invalid", "Here is a private " + "key",
+            "[Continue](/help)", "Here is a private key",
         ]))
         #expect(await engine.suggestions(for: exampleText) == ["Continue", "Please explain"])
     }

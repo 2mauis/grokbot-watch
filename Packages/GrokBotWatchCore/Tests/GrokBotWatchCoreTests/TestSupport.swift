@@ -78,6 +78,7 @@ final class TestStore<Record: Codable & Sendable>: OperationStore, @unchecked Se
 actor TestWC: WCChannel {
     private(set) var messages: [Data] = []
     private(set) var results: [Data] = []
+    private(set) var snapshot: Data?
     private let acknowledge: Bool
     private let beforeSend: @Sendable () -> Void
 
@@ -97,6 +98,10 @@ actor TestWC: WCChannel {
 
     func transferUserInfo(_ data: Data) {
         results.append(data)
+    }
+
+    func updateApplicationContext(_ data: Data) {
+        snapshot = data
     }
 }
 

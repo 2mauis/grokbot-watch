@@ -12,9 +12,10 @@ import Testing
         #expect(try await client.listBots() == [exampleBot, sandboxBot])
         _ = try await client.transcript(for: exampleBot)
         _ = try await client.transcript(for: sandboxBot)
-        let outbox = Outbox(client: client, wait: { _ in })
-        _ = await outbox.write(messageAttempt(), for: exampleBot)
-        _ = await outbox.write(messageAttempt(bot: sandboxBot), for: sandboxBot)
+        let phone = try relay(transport: http, store: TestStore<RelayRecord>())
+        _ = try await phone.receive(messageAttempt(), for: exampleBot)
+        let gatewayAttempt = WriteAttempt(opID: UUID(), number: 1, payload: messageAttempt(bot: sandboxBot).payload)
+        _ = try await phone.receive(gatewayAttempt, for: sandboxBot)
 
         let requests = await http.requests
         #expect(requests.map(\.route) == [
@@ -26,8 +27,9 @@ import Testing
 
     @Test func rejectsMismatchedBotWithoutMakingARequest() async throws {
         let http = TestHTTP()
-        let output = await Outbox(client: BotClient(transport: http)).write(messageAttempt(), for: sandboxBot)
-        #expect(output.status == .rejected)
+        let phone = try relay(transport: http, store: TestStore<RelayRecord>())
+        let output = try await phone.receive(messageAttempt(), for: sandboxBot)
+        #expect(output?.result == .rejected)
         #expect(await http.requests.isEmpty)
     }
 
@@ -123,6 +125,15 @@ import Testing
             now: { exampleTime }
         )
         #expect(try await phone.receive(approval, for: exampleBot)?.result == .notDelivered)
+        #expect(await http.requests.map(\.operation) == [.transcript, .resolveApproval, .transcript])
+    }
+
+    @Test func confirmationReportedNotDeliveredRequiresAReadBeforeRetry() async throws {
+        let http = try TestHTTP([
+            response([entry(.pending)]), response(DeliveryStatus.notDelivered), response([entry(.approvalResolved(.allow))]),
+        ])
+        let phone = try relay(transport: http, store: TestStore<RelayRecord>())
+        #expect(try await phone.receive(approval, for: exampleBot)?.result == .accepted)
         #expect(await http.requests.map(\.operation) == [.transcript, .resolveApproval, .transcript])
     }
 
