@@ -1,6 +1,6 @@
 # grokbot-watch 规格 v0 / Spec v0
 
-状态：草案 v0.1 / 待复评（设计评审轮；已按首轮评审的 3 项阻断 S2 修订，见 design/2026-11-16-review-decisions.md）。采用模板：workflow-template 2.2.2（workflow v2.2）。
+状态：草案 v0.2 / 待复评（设计评审轮；v0.1 按首轮评审的 3 项阻断 S2 修订，v0.2 按复评的 2 项阻断 S2 修订，见 design/2026-11-16-review-decisions.md 和 design/2026-11-16-review-2-decisions.md）。采用模板：workflow-template 2.2.2（workflow v2.2）。
 对应功能地图：[feature-map.md](feature-map.md)。架构：[architecture.md](architecture.md)。调研与决策归档：[design/](design/)。
 
 ## 1. 背景与目标
@@ -68,16 +68,16 @@ F4 的录音转写，F6，F7，F8 的 complication 和可操作通知，F2 的 x
 
 ### B2 私有接口客户端
 - [ ] 需求：能区分两类 Bot（sandbox gateway 和服务端 harness），并路由到对应接口。测试：`BotRoutingTests`，用录制的匿名化样例做夹具。验收面：L。
-- [ ] 需求：按操作类型执行防重复规则（architecture §5.1）：任何路径都不自动重发；每一次写请求都来自用户的一次显式操作（首次点击或手动重试）。测试：`OutboxTests`。输入：写请求超时、连接中断、5xx、401。预期：自动流程只产生查询（对账）请求，不产生第二次写请求；写请求次数等于用户显式操作次数。验收面：L。
-- [ ] 需求：发消息（快速回复、卡片、听写）使用由 `opId` 派生的客户端 nonce，手动重试沿用同一个 nonce，同一操作最多 3 次写请求；结果未知时按 harness 对账：服务端 Bot 用发送状态查询（约每 2 s 一次，60 s 后放弃），gateway Bot 读对话尾部按 nonce 加文本核对。测试：`MessageReconcileTests`。预期：对账确认已送达后，手动重试按钮消失；同一 nonce 在服务端只留一条。验收面：L。
+- [ ] 需求：按操作类型执行防重复规则（architecture §5.1）：任何路径都不自动重放写请求；用户发起的写请求只来自首次点击或点"重试"。测试：`OutboxTests`。输入：写请求超时、连接中断、5xx、401。预期：自动流程只产生查询（对账）请求，不产生第二次写请求；用户发起的写请求次数等于首次点击加重试的次数。验收面：L。
+- [ ] 需求：发消息（快速回复、卡片、听写）使用由 `opId` 派生的客户端 nonce，重试沿用同一个 nonce（与 `attempt` 无关），同一 `opId` 最多 3 次写请求；对账确认未送达或放弃时回 `notDelivered`；结果未知时按 harness 对账：服务端 Bot 用发送状态查询（约每 2 s 一次，60 s 后放弃），gateway Bot 读对话尾部按 nonce 加文本核对。测试：`MessageReconcileTests`。预期：对账确认已送达后，手动重试按钮消失；同一 nonce 在服务端只留一条。验收面：L。
 - [ ] 需求：确认答复（widget、Allow/Deny）和表单（user-form）没有 nonce，靠条目状态去重：写之前和手动重试之前都先重读条目（widget 的已答值、approval 的 `status`、表单的处理结果），已经处理过就直接显示结果，不再写。测试：`EntryStateGuardTests`。输入：条目已答、已过期、仍待处理三种状态。预期：只有"仍待处理"时才发写请求。验收面：L。
 - [ ] 需求：响应字段缺失、类型变化、401/403/404、未知枚举都归入"协议失效"分类，对应功能降级而不崩溃。测试：`ProtocolGuardTests`。验收面：L。
 
 ### B3 WatchConnectivity 协议
-- [ ] 需求：所有消息使用版本化信封 `{v, id, type, sentAt, body}`；版本不匹配时回 `error.version`。测试：`EnvelopeCodecTests`。验收面：L。
-- [ ] 需求：手表为每次用户操作生成一个 `opId`，先写入手表本地持久发件箱再交给 WatchConnectivity；状态为 `queued → handedToPhone → accepted / rejected / unknown`。WC 报错、回执丢失、手表 app 被挂起时都不换 `opId`。测试：`WatchOutboxTests`。预期：手表重启后发件箱条目还在，状态不倒退。验收面：L、D。
-- [ ] 需求：iPhone 收到写请求后，先把 `opId → 服务器请求 ID（nonce）, state=pending` 落盘（write-ahead），落盘成功才发网络写请求；重启后遇到 pending 记录只对账，不再写。去重记录保留 7 天。测试：`RelayIdempotencyTests`。输入：①回执丢失后手表用同一 `opId` 重投；②iPhone 在写请求发出后、结果落盘前被杀，重启后同一 `opId` 再次投递；③同一 `opId` 经 WC 投递两次。预期：三种情况都只有一次写请求，后续只对账。验收面：L。
-- [ ] 需求：服务器请求 ID 由手表 `opId` 确定性派生（规则见 architecture §5.2），中转路径和后续 F7 直连路径对同一操作落到同一个服务端 nonce；已交给手机、结果未知的操作不得改走直连新发。测试：`NonceDerivationTests`。验收面：L。
+- [ ] 需求：所有消息使用版本化信封 `{v, id, type, sentAt, body}`，写操作的 body 带 `opId` 和 `attempt`；版本不匹配时回 `error.version`。测试：`EnvelopeCodecTests`。验收面：L。
+- [ ] 需求：手表为每次用户操作生成一个 `opId`，先写入手表本地持久发件箱再交给 WatchConnectivity；状态为 `queued`（从未投递）→ `sentNoAck`（已投递未 ack）→ `handedToPhone` → `accepted / rejected / notDelivered / unknown`，`sentNoAck` 在投递之前落盘。WC 报错、回执丢失、手表 app 被挂起时都不换 `opId`，只做重投（`attempt` 不变）；只有收到 `notDelivered` 才显示"重试"，用户点重试时 `attempt` 加 1。测试：`WatchOutboxTests`。预期：手表重启后发件箱条目还在，状态不倒退；投递过的条目不会回到 `queued`；`accepted`/`rejected`/`unknown` 不显示重试。验收面：L、D。
+- [ ] 需求：iPhone 去重键为 `(opId, attempt)`。收到写请求后，先把 `(opId, attempt) → nonce, state=pending` 落盘（write-ahead），落盘成功才发网络写请求；重启后遇到 pending 记录只对账，不再写。新的 `attempt` 只有满足"重试准入"（architecture §5.2：上一次尝试为终态 `notDelivered`、`attempt == 已写次数 + 1 ≤ 3`、确认和表单重读仍为 pending）才写。去重记录保留 7 天。测试：`RelayIdempotencyTests`。输入：①回执丢失后手表用同一 `(opId, attempt)` 重投；②iPhone 在写请求发出后、结果落盘前被杀，重启后同一 `(opId, attempt)` 再次投递；③同一 `(opId, attempt)` 经 WC 投递两次；④上一次为 `notDelivered` 时收到 attempt 2；⑤上一次为 `accepted` 时收到 attempt 2；⑥attempt 跳号（1 之后直接 3）；⑦attempt 4。预期：①②③只有一次写请求，后续只对账；④产生第二次写请求且 nonce 不变；⑤回 `accepted` 不写；⑥⑦回 `rejected(reason=attempt)` 不写。验收面：L。
+- [ ] 需求：服务器请求 ID 由手表 `opId` 确定性派生（规则见 architecture §5.2），中转路径和后续 F7 直连路径对同一操作落到同一个服务端 nonce；改走直连的状态规则见 architecture §5.2（`sentNoAck` 的确认和表单不得直连）。测试：`NonceDerivationTests`，断言 nonce 为小写、同一 `opId` 的各次尝试 nonce 相同。验收面：L。
 - [ ] 需求：回执分两段：`sendMessage` 的 reply 只回"手机已接收"（`op.ack`）；最终结果（`op.result`）一律经 `transferUserInfo` 回传（排队、保证送达，手表不在前台也不丢），同时写进下一次快照的 `recentOps`。测试：`ResultDeliveryTests`。预期：手表放下手腕后再抬起，能看到最终结果；重复收到同一 `opId` 的结果时只更新一次。验收面：L、D。
 - [ ] 需求：待处理列表和候选回复用 application context 快照下发，手表冷启动时能立即显示上一次快照并标明时间。验收面：S、D。
 
@@ -123,8 +123,8 @@ F4 的录音转写，F6，F7，F8 的 complication 和可操作通知，F2 的 x
 ## 6. 不变量
 
 - token、refresh token、gateway token 只存放在获取它的那台设备的 Keychain 里（iPhone 或手表），不经 WatchConnectivity 传输，不写日志，不进快照，不进仓库。
-- 任何路径都不自动重发写操作（发消息、确认答复、表单、语音开关、transcript 写回）；每一次写请求都对应用户的一次显式操作。结果不确定时只对账，不重发。各类操作的去重方式见 architecture §5.1。
-- 同一个用户操作在整个链路上只有一个 `opId`：手表发件箱、iPhone 落盘记录、服务端请求 ID 都由它派生；结果未知的操作不换路径重发。
+- 任何路径都不自动重放写请求（发消息、确认答复、表单、transcript 写回、通话后 handoff）。每个写请求只由一次用户操作（首次点击或点"重试"）或一次通话结束自动发起；结果不确定时只对账，不重放。语音开关不是服务端写请求，按目标状态处理。各类操作的去重方式见 architecture §5.1。
+- 同一个用户操作在整个链路上只有一个 `opId`：手表发件箱、iPhone 落盘记录、服务端请求 ID 都由它派生；重试只增加 `attempt`，不换 `opId`。结果未知的操作按 architecture §5.2 的状态规则决定能否换路径。
 - 协议失效时只降级受影响的功能，并明确提示"请在手机上处理"；不猜测字段，也不改发到其他接口。
 - 不在手表或 iPhone 后台常驻；只在用户显式开始的通话期间使用后台音频（单次上限 5 分钟），通话结束立即停用。
 - 不使用 grok-wear 仓库里属于 xAI 的头像设计数据。
@@ -135,7 +135,14 @@ S-3 是 F5 实现批次的**前置闸门**，必须先做；其余验证项不�
 
 - S-1：真机上，手表在活跃音频会话期间能否建立到 `wss://api.x.ai/v1/realtime` 的 WebSocket（TN3135 限制）。
 - S-2：手表麦克风 PCM 经 `WCSession.sendMessageData` 中转到 iPhone 的端到端延迟和丢包。
-- **S-3（闸门，先做）**：手机锁屏时，能否从手表发起 iPhone 后台录音和语音会话。配套 app 声明后台音频模式，手表经 `sendMessage` 唤醒 iPhone 后尝试激活 `AVAudioSession` 并开始录音（后台启动录音可能报 `cannotStartRecording`）。测试矩阵：配套 app 未运行、已挂起、前台后锁屏、被用户从多任务里划掉，四种状态各测手机锁屏和解锁两种情况。结论：全部"锁屏"项通过才算通过，F5 采用方案 A；任一锁屏项不通过，F5 改为方案 B"手机发起、手表控制"。用 CallKit 发起呼出通话来换取后台音频属于重大取舍，不在本验证范围内，要负责人另行批准。
+- **S-3（闸门，先做）**：手机锁屏时，能否从手表发起 iPhone 后台录音和语音会话。配套 app 声明后台音频模式，手表经 `sendMessage` 唤醒 iPhone 后尝试激活 `AVAudioSession` 并开始录音（后台启动录音可能报 `cannotStartRecording`）。测试矩阵（三种状态，各测手机锁屏和解锁两种情况）：
+  - 未运行：iPhone 重启后解锁一次（首次解锁），不打开配套 app；用 Xcode 的设备进程列表或控制台确认配套 app 进程不在。
+  - 已挂起：打开配套 app，回到主屏幕，等至少 30 秒，确认 app 已挂起（Xcode 调试器断开后观察，不能在调试器附着下测，附着会改变挂起行为）。
+  - 前台后锁屏：配套 app 停在前台时按侧边按钮锁屏。
+  
+  通过标准：三种状态的"锁屏"项全部通过，F5 采用方案 A；任一锁屏项不通过，F5 改为方案 B"手机发起、手表控制"。
+  
+  已知限制（不计入通过标准）：配套 app 被用户从多任务里划掉后，WatchConnectivity 一般不会再把它拉起来，两种方案下都一样。这一项只用来验证手表上的提示文案（"请在手机上打开配套 app"）是否正确出现。用 CallKit 发起呼出通话来换取后台音频属于重大取舍，不在本验证范围内，要负责人另行批准。
 - S-4：设备端 Foundation Models 生成 2–4 条候选的延迟和质量（iPhone 机型要支持 Apple Intelligence）。
 
 ## 8. 风险与回退
