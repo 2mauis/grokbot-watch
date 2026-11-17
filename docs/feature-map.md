@@ -25,3 +25,5 @@
 防重复和防丢失规则对 F1–F5 的所有写操作都适用，见 architecture §5.1、§5.2：没收到 ack 只重投（`attempt` 不变），收到 `notDelivered` 后用户点重试（`attempt` 加 1），发消息的 nonce 始终由 `opId` 派生。S-3 的通过标准只看"未运行、已挂起、前台后锁屏"三种状态，"被用户划掉"是已知限制。
 
 签名约束：免费 Personal Team 侧载，签名 7 天过期。远程推送等依赖付费会员的能力不可用，对各功能的影响见 spec §10；F8+ 的可操作通知只能用本地通知，complication 是否可用要先验证 App Groups。
+
+CI：配置已在本地准备，尚未首跑验证。标准 `xcode-27` 预览 runner 显式选择 Xcode 27.2，计划执行完整 Swift 核心测试、双端 Debug 无签名模拟器 clean build、内嵌 Watch 产物核验及检查器 fixture 自测；不据此改变以上功能验收状态。CI 不覆盖 Linux、真机、签名或真实适配器，也不替代独立评审。详见 [ci.md](ci.md)。
