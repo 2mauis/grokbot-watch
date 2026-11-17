@@ -66,7 +66,7 @@ F4 的录音转写，F6，F7，F8 的 complication 和可操作通知，F2 的 x
 ### B1 登录
 - [ ] 需求：iPhone 发起浏览器授权（PKCE，verifier 只在本机生成和保存）。测试：`AuthFlowTests`。输入：模拟的授权轮询响应。预期：token 写入 Keychain（`ThisDeviceOnly`，不同步），日志里不出现 token。验收面：L、D。
 - [ ] 需求：刷新的结果不确定时不自动重试，状态转为"需要重新登录"。测试：`AuthRefreshTests`。验收面：L。
-- [ ] 需求：登出时删除本地凭据和缓存，不影响服务端账号。验收面：L、D。
+- [ ] 需求：登出时删除本地凭据和缓存，不影响服务端账号。各端完成清理后，发件箱或去重表的内存与存储都为空，清理前挂起的操作不能写回或发布旧结果。测试：`SignOutPurgeTests`。验收面：L、D。
 
 ### B2 私有接口客户端
 - [ ] 需求：能区分两类 Bot（sandbox gateway 和服务端 harness），并路由到对应接口。测试：`BotRoutingTests`，用录制的匿名化样例做夹具。验收面：L。
