@@ -1,7 +1,9 @@
 # grokbot-watch 规格 v0 / Spec v0
 
-状态：草案 v0.2 / 待复评（设计评审轮；v0.1 按首轮评审的 3 项阻断 S2 修订，v0.2 按复评的 2 项阻断 S2 修订，见 design/2026-11-16-review-decisions.md 和 design/2026-11-16-review-2-decisions.md）。采用模板：workflow-template 2.2.2（workflow v2.2）。
-对应功能地图：[feature-map.md](feature-map.md)。架构：[architecture.md](architecture.md)。调研与决策归档：[design/](design/)。
+当前阶段（2026-11-17）：纯逻辑核心、占位 App 和 CI 已合入 main `e0226fe833b9fed617c7c1c6f06eb23d7b29fe9f`，**产品 MVP 尚未达成**。实现与验证分开记录于 [功能地图](feature-map.md) 和 [MVP 状态](mvp-status.md)，实际 CI 证据见 [ci.md](ci.md#公开运行证据)。需求版本仍为 v0.2；本次状态同步不改变下列需求、验收阈值或勾选标准。
+
+历史设计阶段状态：草案 v0.2 / 待复评（设计评审轮；v0.1 按首轮评审的 3 项阻断 S2 修订，v0.2 按复评的 2 项阻断 S2 修订，见 design/2026-11-16-review-decisions.md 和 design/2026-11-16-review-2-decisions.md）。采用模板：workflow-template 2.2.2（workflow v2.2）。
+对应功能地图：[feature-map.md](feature-map.md)。架构：[architecture.md](architecture.md) 保留设计阶段记录，当前 CI 状态以 [ci.md](ci.md) 为准。调研与决策归档：[design/](design/)。
 
 ## 1. 背景与目标
 
@@ -25,7 +27,7 @@
 - 不做后台常驻或保活：不滥用 workout 或 extended runtime session。
 - 不替换 Siri，不监听唤醒词。
 - 第一版不做 xAI 官方 API 直连路线（作为协议失效时的备选，见 architecture §8）。
-- 本轮（spec-v0）只写规格和设计评审，不写实现代码，也不加 CI（`.github/**` 属于政策文件，要另行批准）。
+- 历史阶段（spec-v0）只写规格和设计评审，不写实现代码，也不加 CI（`.github/**` 属于政策文件，要另行批准）。后续实现与单独批准的 CI 已进入 main，见文首状态；此处保留原阶段范围。
 
 ## 3. 优先级说明
 
@@ -61,7 +63,7 @@ F4 的录音转写，F6，F7，F8 的 complication 和可操作通知，F2 的 x
 
 验收面分三种：L 表示本地单元测试（纯 Swift 包，可以在 Linux 或 macOS 上跑 `swift test`）；S 表示 Xcode 模拟器（需要 macOS）；D 表示真机（负责人的 iPhone 和 Apple Watch）。模拟器总是放行低层网络，所以凡是涉及网络限制的项都必须在真机上验收。
 
-第一批纯逻辑实现的状态见 [功能地图](feature-map.md)。各项验收仍按对应的 L、S 和 D 验收面执行。
+第一批纯逻辑实现的状态见 [功能地图](feature-map.md)。已有 fake／协议注入单元测试及模拟器构建结构证据，不能代替 App 交互、真机或真实服务验收；分层说明见 [MVP 状态](mvp-status.md#验证层级)。各项验收仍按对应的 L、S 和 D 验收面执行，下列验收框保持原状态。
 
 ### B1 登录
 - [ ] 需求：iPhone 发起浏览器授权（PKCE，verifier 只在本机生成和保存）。测试：`AuthFlowTests`。输入：模拟的授权轮询响应。预期：token 写入 Keychain（`ThisDeviceOnly`，不同步），日志里不出现 token。验收面：L、D。
@@ -152,7 +154,7 @@ S-3 是 F5 实现批次的**前置闸门**，必须先做；其余验证项不�
 - 私有接口随时可能变化，导致功能失效；还可能不符合 xAI 的条款（[Acceptable Use Policy](https://x.ai/legal/acceptable-use-policy) 限制以 bot 方式访问和逆向服务）。负责人已接受这一风险，并限定为个人自用。回退：协议失效时降级为只读或"请在手机上处理"；备选路线见 architecture §8。
 - 账号风险：异常调用可能触发风控。缓解：只调用官方客户端会用到的操作，遵守限速，写操作不重试。
 - watchOS 网络和后台限制可能使手表直连语音不可行。缓解：手机麦克风模式是 MVP 的默认模式。
-- 构建环境：Linux 上的 Codex 云端无法编译 watchOS/iOS target。App target 的构建、签名和真机调试在负责人的 Mac 笔记本上用 Xcode 进行（见 §10）。
+- 构建环境：Linux 上的 Codex 云端无法编译 watchOS/iOS target。App target 已有 macOS CI 无签名模拟器构建证据（见 [ci.md](ci.md)），签名和真机调试仍在负责人的 Mac 上用 Xcode 进行（见 §10）。
 - 侧载签名：使用免费 Personal Team，签名 7 天过期，App ID 和能力受限，见 §10。
 
 ## 9. 是否重大变更
@@ -162,6 +164,9 @@ S-3 是 F5 实现批次的**前置闸门**，必须先做；其余验证项不�
 ## 10. 构建与签名约束（负责人 2026-11-16 决定）
 
 - 构建和真机调试：在负责人的 Mac 笔记本上用 Xcode 构建 watchOS/iOS target、签名、安装到负责人的 iPhone 和 Apple Watch。纯 Swift 核心包仍可在 Linux 上 `swift test`。本轮不接 macOS CI。
+
+后续状态（2026-11-17）：CI 已经单独批准并合入 main，覆盖双端无签名模拟器构建和纯逻辑测试，见 [ci.md](ci.md#公开运行证据)。Linux Swift 尚未实跑；真机签名、安装及功能尚未验收。上条保留 2026-11-16 的原始决定。
+
 - 签名：没有付费 Apple Developer Program 会员，使用免费的 Personal Team 侧载（依据 Apple [Developer account overview](https://developer.apple.com/help/account/basics/about-your-developer-account/)）：
   - 描述文件签发 7 天后过期，过期后 app 打不开，要回到 Mac 上重新构建、安装（iPhone 和手表 app 都要）。
   - 最多 10 个 App ID（7 天过期），最多 3 台设备（iPhone 和手表占 2 台），每台设备最多装 3 个这样签名的 app。本项目需要 iOS app、watchOS app 两个 App ID，后续加 complication/widget 扩展会再占一个。
