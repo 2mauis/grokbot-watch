@@ -6,18 +6,18 @@
 
 | 编号 | 功能 | 档位 | 端 | 状态 | 依赖 |
 |---|---|---|---|---|---|
-| B1 | iPhone 登录与 token（Keychain） | MVP | iPhone | 📝 | — |
-| B2 | 私有接口客户端与协议失效检测 | MVP | iPhone（F7 时手表复用） | 📝 | B1 |
-| B3 | WatchConnectivity 消息协议 v1（手表持久发件箱、`(opId, attempt)` 去重、iPhone 先落盘、结果经 transferUserInfo 回传、`notDelivered` 驱动重试） | MVP | 两端 | 📝 | — |
-| F1 | 确认类问答（widget / Allow-Deny / user-form） | MVP | 手表 | 📝 | B2、B3 |
-| F2 | 智能快速回复（iPhone 生成 2–4 条候选） | MVP | iPhone 生成，手表展示 | 📝 🔬 S-4 | B2、B3 |
+| B1 | iPhone 登录与 token（Keychain） | MVP | iPhone | 🚧 实现中（纯逻辑层） | — |
+| B2 | 私有接口客户端与协议失效检测 | MVP | iPhone（F7 时手表复用） | 🚧 实现中（纯逻辑层） | B1 |
+| B3 | WatchConnectivity 消息协议 v1（手表持久发件箱、`(opId, attempt)` 去重、iPhone 先落盘、结果经 transferUserInfo 回传、`notDelivered` 驱动重试） | MVP | 两端 | 🚧 实现中（纯逻辑层） | — |
+| F1 | 确认类问答（widget / Allow-Deny / user-form） | MVP | 手表 | 🚧 实现中（纯逻辑层） | B2、B3 |
+| F2 | 智能快速回复（iPhone 生成 2–4 条候选） | MVP | iPhone 生成，手表展示 | 🚧 实现中（纯逻辑层） 🔬 S-4 | B2、B3 |
 | F3 | 自定义常用回复卡片 | MVP | iPhone 编辑，手表使用 | 📝 | B3 |
 | F4 | 语音输入兜底：系统听写 | MVP | 手表 | 📝 | B3（发送） |
 | F4+ | 语音输入：录音交 iPhone 或 xAI 转写 | 后续 | 两端 | ⏳ | B3 |
 | F5 | 语音对话开关（手机麦克风模式；S-3 通过则手表可发起，不通过则手机发起、手表控制） | MVP | iPhone 跑会话，手表控制 | 📝 🔬 S-3（闸门，先做） | B2、B3、S-3 |
 | F6 | 麦克风智能路由（手表中转 / 直连） | 后续 | 两端 | ⏳ 🔬 S-1、S-2 | F5；直连还依赖 F7 |
 | F7 | 手表直连 HTTPS 降级（手表独立登录） | 后续 | 手表 | ⏳ | B2 |
-| F8 | "需要你处理"收件箱 | MVP | 手表 | 📝 | B2、B3 |
+| F8 | "需要你处理"收件箱 | MVP | 手表 | 🚧 实现中（纯逻辑层） | B2、B3 |
 | F8+ | complication / 可操作通知 | 后续 | 两端 | ⏳ | F8 |
 
 快速回答的优先级：F2 智能快速回复 → F3 自定义卡片 → F4 语音输入（最后的兜底）。

@@ -61,10 +61,12 @@ F4 的录音转写，F6，F7，F8 的 complication 和可操作通知，F2 的 x
 
 验收面分三种：L 表示本地单元测试（纯 Swift 包，可以在 Linux 或 macOS 上跑 `swift test`）；S 表示 Xcode 模拟器（需要 macOS）；D 表示真机（负责人的 iPhone 和 Apple Watch）。模拟器总是放行低层网络，所以凡是涉及网络限制的项都必须在真机上验收。
 
+第一批纯逻辑实现的状态见 [功能地图](feature-map.md)。各项验收仍按对应的 L、S 和 D 验收面执行。
+
 ### B1 登录
 - [ ] 需求：iPhone 发起浏览器授权（PKCE，verifier 只在本机生成和保存）。测试：`AuthFlowTests`。输入：模拟的授权轮询响应。预期：token 写入 Keychain（`ThisDeviceOnly`，不同步），日志里不出现 token。验收面：L、D。
 - [ ] 需求：刷新的结果不确定时不自动重试，状态转为"需要重新登录"。测试：`AuthRefreshTests`。验收面：L。
-- [ ] 需求：登出时删除本地凭据和缓存，不影响服务端账号。验收面：L、D。
+- [ ] 需求：登出时删除本地凭据和缓存，不影响服务端账号。各端完成清理后，发件箱或去重表的内存与存储都为空，清理前挂起的操作不能写回或发布旧结果。测试：`SignOutPurgeTests`。验收面：L、D。
 
 ### B2 私有接口客户端
 - [ ] 需求：能区分两类 Bot（sandbox gateway 和服务端 harness），并路由到对应接口。测试：`BotRoutingTests`，用录制的匿名化样例做夹具。验收面：L。
@@ -76,9 +78,9 @@ F4 的录音转写，F6，F7，F8 的 complication 和可操作通知，F2 的 x
 ### B3 WatchConnectivity 协议
 - [ ] 需求：所有消息使用版本化信封 `{v, id, type, sentAt, body}`，写操作的 body 带 `opId` 和 `attempt`；版本不匹配时回 `error.version`。测试：`EnvelopeCodecTests`。验收面：L。
 - [ ] 需求：手表为每次用户操作生成一个 `opId`，先写入手表本地持久发件箱再交给 WatchConnectivity；状态为 `queued`（从未投递）→ `sentNoAck`（已投递未 ack）→ `handedToPhone` → `accepted / rejected / notDelivered / unknown`，`sentNoAck` 在投递之前落盘。WC 报错、回执丢失、手表 app 被挂起时都不换 `opId`，只做重投（`attempt` 不变）；只有收到 `notDelivered` 才显示"重试"，用户点重试时 `attempt` 加 1。测试：`WatchOutboxTests`。预期：手表重启后发件箱条目还在，状态不倒退；投递过的条目不会回到 `queued`；`accepted`/`rejected`/`unknown` 不显示重试。验收面：L、D。
-- [ ] 需求：iPhone 去重键为 `(opId, attempt)`。收到写请求后，先把 `(opId, attempt) → nonce, state=pending` 落盘（write-ahead），落盘成功才发网络写请求；重启后遇到 pending 记录只对账，不再写。新的 `attempt` 只有满足"重试准入"（architecture §5.2：上一次尝试为终态 `notDelivered`、`attempt == 已写次数 + 1 ≤ 3`、确认和表单重读仍为 pending）才写。去重记录保留 7 天。测试：`RelayIdempotencyTests`。输入：①回执丢失后手表用同一 `(opId, attempt)` 重投；②iPhone 在写请求发出后、结果落盘前被杀，重启后同一 `(opId, attempt)` 再次投递；③同一 `(opId, attempt)` 经 WC 投递两次；④上一次为 `notDelivered` 时收到 attempt 2；⑤上一次为 `accepted` 时收到 attempt 2；⑥attempt 跳号（1 之后直接 3）；⑦attempt 4。预期：①②③只有一次写请求，后续只对账；④产生第二次写请求且 nonce 不变；⑤回 `accepted` 不写；⑥⑦回 `rejected(reason=attempt)` 不写。验收面：L。
+- [ ] 需求：iPhone 去重键为 `(opId, attempt)`。收到写请求后，先把 `(opId, attempt) → nonce, state=pending` 落盘（write-ahead），落盘成功才发网络写请求；重启后遇到 pending 记录只对账，不再写。新的 `attempt` 只有满足"重试准入"（architecture §5.2：`attempt ≥ 2` 才要求上一次为终态 `notDelivered`；所有尝试要求 `attempt == 已写次数 + 1 ≤ 3`，确认和表单重读仍为 pending）才写。已写次数和 `writesDone` 均为同一 `opId` 已准入、已落盘的尝试数。去重记录保留 7 天。测试：`RelayIdempotencyTests`。输入：①回执丢失后手表用同一 `(opId, attempt)` 重投；②iPhone 在写请求发出后、结果落盘前被杀，重启后同一 `(opId, attempt)` 再次投递；③同一 `(opId, attempt)` 经 WC 投递两次；④上一次为 `notDelivered` 时收到 attempt 2；⑤上一次为 `accepted` 时收到 attempt 2；⑥attempt 跳号（1 之后直接 3）；⑦attempt 4；⑧iPhone 在尝试落盘后、发请求前被杀，对账为 `notDelivered` 后收到 attempt 2。预期：①②③只有一次写请求，后续只对账；④产生第二次写请求且 nonce 不变；⑤回 `accepted` 不写；⑥⑦回 `rejected(reason=attempt)` 不写；⑧attempt 2 准入，累计两次已落盘的尝试。验收面：L。
 - [ ] 需求：服务器请求 ID 由手表 `opId` 确定性派生（规则见 architecture §5.2），中转路径和后续 F7 直连路径对同一操作落到同一个服务端 nonce；改走直连的状态规则见 architecture §5.2（`sentNoAck` 的确认和表单不得直连）。测试：`NonceDerivationTests`，断言 nonce 为小写、同一 `opId` 的各次尝试 nonce 相同。验收面：L。
-- [ ] 需求：回执分两段：`sendMessage` 的 reply 只回"手机已接收"（`op.ack`）；最终结果（`op.result`）一律经 `transferUserInfo` 回传（排队、保证送达，手表不在前台也不丢），同时写进下一次快照的 `recentOps`。测试：`ResultDeliveryTests`。预期：手表放下手腕后再抬起，能看到最终结果；重复收到同一 `opId` 的结果时只更新一次。验收面：L、D。
+- [ ] 需求：回执分两段：`sendMessage` 的 reply 只回"手机已接收"（`op.ack`）；结果（`op.result`）一律经 `transferUserInfo` 回传（排队、保证送达，手表不在前台也不丢），同时写进下一次快照的 `recentOps`。测试：`ResultDeliveryTests`。预期：手表放下手腕后再抬起，能看到最终结果；两条通道没有先后顺序，按 `(opId, attempt)` 合并。`unknown` 表示 iPhone 仍在对账，可更新为 `accepted`、`rejected` 或 `notDelivered`；终态不会被覆盖，较旧 attempt 的结果只记录、不改界面。纯逻辑用例覆盖 `unknown → accepted`、快照晚到但结果早于 userInfo，以及旧 attempt 的结果迟到。验收面：L、D。
 - [ ] 需求：待处理列表和候选回复用 application context 快照下发，手表冷启动时能立即显示上一次快照并标明时间。验收面：S、D。
 
 ### F1 确认类问答

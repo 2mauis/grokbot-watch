@@ -6,7 +6,15 @@ Apple Watch 上的 Grok Bot 轻量伴侣，配合官方 Grok Bot iPhone app 使�
 
 ## 状态
 
-规格 v0.2 设计复评中（已按两轮评审修订防重复、防丢失、重试规则和 F5 闸门），还没有实现代码。
+规格 v0.2 已进入第一批实现。B1、B2、B3、F1、F2、F8 的纯 Swift 逻辑已实现并有单元测试，iOS 和 watchOS App 已有占位页面。浏览器授权、Keychain、真实 HTTP 和 WatchConnectivity 适配器待接入。
+
+## 功能演示
+
+以下画面来自 Apple Watch Series 12（46 mm）的 watchOS 27.2 模拟器。演示界面使用现有 Swift 核心和模拟数据。
+
+| 收件箱 | 审批确认 | 快捷回复 |
+| :---: | :---: | :---: |
+| <img src="docs/screenshots/watchos-inbox.png" alt="收件箱列出待审批和待回复事项" width="190"> | <img src="docs/screenshots/watchos-approval.png" alt="审批确认显示允许一次和拒绝" width="190"> | <img src="docs/screenshots/watchos-quick-replies.png" alt="快捷回复列出三条候选" width="190"> |
 
 ## 功能（与 [docs/feature-map.md](docs/feature-map.md) 一致）
 
@@ -25,11 +33,35 @@ Apple Watch 上的 Grok Bot 轻量伴侣，配合官方 Grok Bot iPhone app 使�
 
 手表负责轻量的回复和控制；iPhone 配套 app 负责登录、和 Grok Bot 服务通信、跑语音；两端走 WatchConnectivity。手表有网而手机不在身边时，可以走 HTTPS 降级。详见 [docs/architecture.md](docs/architecture.md)。
 
-## 构建
+## 在 Mac 上构建
 
-watchOS、iOS target 在负责人的 Mac 笔记本上用 Xcode 构建和真机调试；纯 Swift 核心包可以在 Linux 上跑 `swift test`。本仓库暂时没有 CI。
+用 Xcode 打开 `GrokBotWatch.xcodeproj`。两个 App 的最低系统版本为 iOS 26.0 和 watchOS 26.0。
 
-签名用免费 Personal Team 侧载：描述文件 7 天过期，要重新构建安装；App ID、设备数量和可用能力都有限制，远程推送等依赖付费会员的能力不可用。详见 [docs/spec.md](docs/spec.md) §10。
+### 模拟器
+
+App 骨架需要在 Mac 上用 Xcode 编译，已用 Xcode 27.2 验证下列无签名构建。
+
+```sh
+xcodebuild -project GrokBotWatch.xcodeproj -scheme GrokBotWatch \
+  -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+xcodebuild -project GrokBotWatch.xcodeproj -scheme 'GrokBotWatch Watch' \
+  -destination 'generic/platform=watchOS Simulator' CODE_SIGNING_ALLOWED=NO build
+```
+
+纯 Swift 核心包可在 macOS 或 Linux 上运行 `swift test --package-path Packages/GrokBotWatchCore`。本仓库暂未配置 CI。
+
+### Personal Team 真机安装
+
+1. 在本机创建 `Config/Secrets.xcconfig`，填入签名团队 ID 和自选的 Bundle ID 前缀。Git 会忽略此文件。
+
+   ```xcconfig
+   DEVELOPMENT_TEAM =
+   BUNDLE_ID_PREFIX =
+   ```
+
+2. 在 Xcode 的 Signing & Capabilities 中，确认两个 target 使用同一个 Personal Team 和自动签名。
+3. 先选择 `GrokBotWatch` scheme 安装 iOS App，再选择 `GrokBotWatch Watch` scheme 安装 Watch App。
+4. 免费 Personal Team 的描述文件 7 天后过期，届时需重新构建并安装两个 App。详见 [规格 §10](docs/spec.md#10-构建与签名约束负责人-2026-11-16-决定)。
 
 ## 文档
 

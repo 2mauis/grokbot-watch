@@ -20,7 +20,9 @@
 └────────────────────────────────────────────────────────────┘
 ```
 
-共享代码放在纯 Swift 包 `Packages/GrokBotWatchCore`，它不依赖 UIKit 或 WatchKit，可以在 Linux 上 `swift test`。内容包括：协议模型、信封编解码、Outbox 状态机、ProtocolGuard、MicRouter 状态机、建议规则引擎。
+共享代码放在纯 Swift 包 `Packages/GrokBotWatchCore`，它不依赖 UIKit 或 WatchKit，可以在 Linux 上 `swift test`。第一批实现包括 `AuthClient`、`BotClient`、`ProtocolGuard`、`EnvelopeCodec`、`WatchOutbox`、`PhoneRelay`、`Outbox`、`SuggestionEngine` 和 `InboxBuilder`。麦克风路由留到 F6。
+
+核心包通过 `PKCEHasher`、`AuthTransport`、`TokenStore`、`HTTPTransport`、`WCChannel` 和 `SuggestionModel` 使用平台能力。当前测试以 fake 实现这些协议；`HTTPTransport` 的请求模型列出允许的操作，实际适配器接入时负责校验私有接口的原始响应并映射为核心模型。
 
 ## 2. 分工
 
@@ -56,7 +58,7 @@
 - 手表在 F7 里**单独登录**：手表显示二维码，在手机浏览器批准；token 只存手表 Keychain。**不经 WatchConnectivity 传送 token**，避免两端共用 refresh token 造成轮换冲突，也缩小泄露面。
 - WC 快照只含展示用的数据：Bot 名、问题文本摘要、选项、候选回复、卡片。快照里不含 token 和 gateway 地址。
 - 日志里不记录消息正文、token 或主机名，只记录操作名、状态码类别和耗时。
-- 手表发件箱和 iPhone 去重表落在各自设备的 app 沙盒里，按敏感数据对待：只存操作类型、目标条目 ID、回复文本和状态，不存 token；登出时一并清空。
+- 手表发件箱和 iPhone 去重表落在各自设备的 app 沙盒里，按敏感数据对待：只存操作类型、目标条目 ID、回复文本和状态，不存 token。各端登出时清空本地内存和存储，清理前挂起的操作不能写回或发起新的结果发布。跨设备触发与清空顺序留给配套 App 接入。
 
 ## 5. WatchConnectivity 消息协议（v1）
 
@@ -109,7 +111,7 @@
                                       3. beginBackgroundTask
    ◄────── reply: op.ack ──────────   4. 回 op.ack（已落盘）
 handedToPhone（落盘）                  5. 发写请求（nonce 固定由 opId 派生）──────► 
-                                      6. 得到结果或对账结论 → 该记录 state=final
+                                      6. 对账未完成时保持 pending，有终态结论后改为 final
    ◄── transferUserInfo: op.result ── 7. 排队 op.result；同时写进快照 recentOps
 accepted / rejected / notDelivered / unknown（落盘）
 notDelivered → 显示"重试" → 用户点重试 → attempt+1，回到 queued
@@ -119,12 +121,12 @@ notDelivered → 显示"重试" → 用户点重试 → attempt+1，回到 queue
 - **重投和重试**：
   - **重投**：同一次尝试再投递一遍，`opId` 和 `attempt` 都不变。用于 `sentNoAck`（没收到 ack）和手机恢复可达后补投。iPhone 按 `(opId, attempt)` 查到已有记录就不写，只回 ack 和已有结果。重投不计入写次数。
   - **重试**：只有收到 `op.result = notDelivered` 后，手表才显示"重试"；用户点了才发，`opId` 不变、`attempt` 加 1。`accepted`、`rejected` 不显示重试；`unknown` 表示 iPhone 还在对账，只显示"处理中"，等最终结果。
-  - **重试准入**（iPhone 在步骤 1 判断，条件全部满足才写）：该 `opId` 上一次尝试的记录已是终态且结果为 `notDelivered`；`attempt == 已写次数 + 1`；`attempt ≤ 3`；确认答复和表单在写前重读条目仍是 pending。上一次已是 `accepted` 时回 `accepted`、不写；`attempt` 跳号或超过 3 时回 `rejected(reason=attempt)`、不写。`attempt` 在写之前和其他字段一起落盘。
+  - **重试准入**（iPhone 在步骤 1 判断，条件全部满足才写）：仅当 `attempt ≥ 2` 时才要求同一 `opId` 上一次尝试已是终态 `notDelivered`；所有尝试都须满足 `attempt == 已写次数 + 1`、`attempt ≤ 3`，且确认答复和表单在写前重读条目仍是 pending。上一次已是 `accepted` 时回 `accepted`、不写；`attempt` 跳号或超过 3 时回 `rejected(reason=attempt)`、不写。`attempt` 在写之前和其他字段一起落盘。已写次数与 `writesDone` 均指该 `opId` 已准入、已落盘的尝试数。落盘后、发请求前进程退出时，已落盘的尝试仍计数；若对账得出 `notDelivered`，下一次尝试可按上述规则准入。
   - **nonce 与服务端去重**：发消息的 nonce 只由 `opId` 派生，和 `attempt` 无关，同一 `opId` 的所有尝试用同一个 nonce。即使上一次尝试其实已经到达服务端、只是对账放弃了，重试也只会被服务端按 nonce 合并成一条，不会出现两条消息；同一 nonce 最多写 3 次也和官方客户端一致。确认答复和表单没有 nonce，靠写前重读条目防止重复。
 - **iPhone 先落盘**：步骤 2 必须在步骤 5 之前完成并成功；落盘失败就回 `op.result(rejected, reason=storage)`，不发写请求。iPhone 重启后扫描 `state=pending` 的记录：只做对账（§5.1），不再写；对账有结论后照常经 `transferUserInfo` 回传。去重表保留 7 天。
 - **服务器请求 ID 派生**：发消息的客户端 nonce 直接取 `opId`（手表生成的 UUID v4，小写带连字符，与官方客户端 nonce 格式一致）。这样中转路径和后续 F7 直连对同一操作落到同一个服务端 nonce。确认答复和表单没有服务器请求 ID，按条目状态去重（§5.1）。
 - **改走直连（F7）的状态规则**：`queued`（从未投递）的操作可以由用户选择改走直连，仍用同一个 nonce。`sentNoAck` 的发消息操作也可以改走直连，靠同一 nonce 由服务端去重；`sentNoAck` 的确认答复和表单不得改走直连，必须等手机可达后经手机对账（手机那边可能已经落盘并在写，直连重读条目看到的 pending 不可信）。`handedToPhone` 及之后的操作一律不得改走直连。
-- **最终结果经 `transferUserInfo` 回传**：[`transferUserInfo(_:)`](https://developer.apple.com/documentation/watchconnectivity/wcsession/transferuserinfo(_:)) 会排队并在对端可用时按顺序送达，手表放下手腕、app 被挂起都不会丢。`sendMessage` 的 reply 只用来回 `op.ack`；从 iPhone 调 `sendMessage` 唤醒不了手表，所以最终结果不走 `sendMessage`。同时把最近 20 条操作结果放进快照 `recentOps`，作为第二条通道；手表按 `opId` 合并，重复结果只更新一次。
+- **结果经 `transferUserInfo` 回传**：[`transferUserInfo(_:)`](https://developer.apple.com/documentation/watchconnectivity/wcsession/transferuserinfo(_:)) 会排队并在对端可用时按顺序送达，手表放下手腕、app 被挂起都不会丢。`sendMessage` 的 reply 只用来回 `op.ack`；从 iPhone 调 `sendMessage` 唤醒不了手表，所以 `op.result` 经 `transferUserInfo` 回传，同时把最近 20 条尝试的结果放进快照 `recentOps`。application context 与 `transferUserInfo` 之间无先后顺序，两处的结果按 `(opId, attempt)` 使用同一规则合并。`unknown` 表示 iPhone 仍在对账，可以推进到 `accepted`、`rejected` 或 `notDelivered`，终态一经记录就不再覆盖。比手表当前 `attempt` 旧的结果只记录，不改变界面。
 - **后台时间**：iPhone 被唤醒后先 `beginBackgroundTask`；冷路径（刷新 token、gateway bootstrap、HTTP 超时）可能超过 reply 时限，所以 ack 在落盘后立即回，不等网络结果。后台时间用完还没有结果时，记录保持 pending，下次配套 app 运行时继续对账。
 
 ### 5.3 语音开关与会话标识
