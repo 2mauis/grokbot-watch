@@ -87,6 +87,7 @@ public actor AuthClient {
     private var verifier: String?
     private var busy = false
     private var signingOut = false
+    private var signOutIncomplete = false
     private var idle: CheckedContinuation<Void, Never>?
 
     public init(
@@ -100,7 +101,7 @@ public actor AuthClient {
     }
 
     public func begin(_ pkce: PKCE) {
-        guard !busy, !signingOut else { return }
+        guard !busy, !signingOut, !signOutIncomplete else { return }
         verifier = pkce.verifier
         state = .awaitingAuthorization
     }
@@ -170,6 +171,7 @@ public actor AuthClient {
     public func signOut() async throws {
         guard !signingOut else { throw AuthError.busy }
         signingOut = true
+        signOutIncomplete = true
         defer { signingOut = false }
         verifier = nil
         if busy {
@@ -179,6 +181,7 @@ public actor AuthClient {
         async let cache: Void = clearCache()
         do {
             _ = try await (credentials, cache)
+            signOutIncomplete = false
             state = .signedOut
         } catch {
             requireLogin()

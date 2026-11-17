@@ -48,6 +48,7 @@ public actor WatchOutbox {
     private let now: @Sendable () -> Int64
     private var records: [UUID: WatchRecord] = [:]
     private var delivering: Set<UUID> = []
+    private var generation: UInt64 = 0
 
     public init(
         store: some OperationStore<WatchRecord>,
@@ -60,6 +61,14 @@ public actor WatchOutbox {
                 throw OperationStoreError.duplicateRecord
             }
         }
+    }
+
+    /// Clear the local cache at sign-out. A failed save leaves the previous cache intact.
+    public func purge() throws {
+        try store.save([])
+        generation &+= 1
+        records.removeAll()
+        delivering.removeAll()
     }
 
     public func record(for opID: UUID) -> WatchRecord? { records[opID] }
@@ -78,7 +87,8 @@ public actor WatchOutbox {
               isWithinRetention(record), delivering.insert(opID).inserted else {
             throw WatchOutboxError.deliveryUnavailable
         }
-        defer { delivering.remove(opID) }
+        let generation = self.generation
+        defer { if generation == self.generation { delivering.remove(opID) } }
 
         let attempt = record.attempt
         if record.state == .queued {
@@ -86,7 +96,14 @@ public actor WatchOutbox {
             try save(record)
         }
         let envelope = WCEnvelope(message: .write(attempt), sentAt: now())
-        let reply = try await channel.sendMessage(EnvelopeCodec.encode(envelope))
+        let reply: Data
+        do {
+            reply = try await channel.sendMessage(EnvelopeCodec.encode(envelope))
+        } catch {
+            guard generation == self.generation else { return }
+            throw error
+        }
+        guard generation == self.generation else { return }
         guard case let .ack(ack) = try EnvelopeCodec.decode(reply).message,
               ack.persisted, ack.opID == opID, ack.attempt == attempt.number else {
             throw WatchOutboxError.invalidAck

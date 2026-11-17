@@ -29,6 +29,9 @@ public actor PhoneRelay {
     private var resultsWithoutAdmission: [OperationResult] = []
     private var activeOps: Set<UUID> = []
     private var activeEntries: Set<EntryKey> = []
+    private var generation: UInt64 = 0
+    private var pendingPublications = 0
+    private var purgeWaiters: [CheckedContinuation<Void, Never>] = []
 
     public init(
         store: some OperationStore<RelayRecord>, outbox: Outbox, channel: some WCChannel,
@@ -45,9 +48,34 @@ public actor PhoneRelay {
         }
     }
 
+    /// Clear the local cache at sign-out and wait only for channel calls already dispatched.
+    /// Operations suspended on a network response lose their generation immediately.
+    public func purge() async throws {
+        if !purgeWaiters.isEmpty {
+            await withCheckedContinuation { purgeWaiters.append($0) }
+            return
+        }
+        try store.save([])
+        generation &+= 1
+        records.removeAll()
+        resultsWithoutAdmission.removeAll()
+        activeOps.removeAll()
+        activeEntries.removeAll()
+
+        if pendingPublications > 0 {
+            await withCheckedContinuation { purgeWaiters.append($0) }
+        }
+    }
+
+    private func isCurrent(_ generation: UInt64) -> Bool {
+        generation == self.generation && purgeWaiters.isEmpty
+    }
+
     public func receiveMessage(
         _ data: Data, resolveBot: @Sendable (String) async -> Bot?, reply: @Sendable (Data) -> Void
     ) async throws {
+        let generation = self.generation
+        guard isCurrent(generation) else { return }
         let envelope: WCEnvelope
         do {
             envelope = try EnvelopeCodec.decode(data)
@@ -63,14 +91,17 @@ public actor PhoneRelay {
         if let stored = records[attempt.key] {
             guard stored.attempt == attempt else { return }
             bot = stored.bot
-        } else if let resolved = await resolveBot(attempt.payload.botID) {
-            bot = resolved
         } else {
-            _ = try await report(.init(.rejected, reason: .invalidOperation), for: attempt, writesDone: 0)
-            return
+            let resolved = await resolveBot(attempt.payload.botID)
+            guard isCurrent(generation) else { return }
+            guard let resolved else {
+                _ = try await report(.init(.rejected, reason: .invalidOperation), for: attempt, writesDone: 0, generation: generation)
+                return
+            }
+            bot = resolved
         }
         let clock = now
-        try await receive(attempt, for: bot) { ack in
+        try await receive(attempt, for: bot, generation: generation) { ack in
             if let data = try? EnvelopeCodec.encode(WCEnvelope(message: .ack(ack), sentAt: clock())) {
                 reply(data)
             }
@@ -83,6 +114,15 @@ public actor PhoneRelay {
         _ attempt: WriteAttempt, for bot: Bot,
         acknowledge: @Sendable (OperationAck) -> Void = { _ in }
     ) async throws -> OperationResult? {
+        try await receive(attempt, for: bot, generation: generation, acknowledge: acknowledge)
+    }
+
+    @discardableResult
+    private func receive(
+        _ attempt: WriteAttempt, for bot: Bot, generation: UInt64,
+        acknowledge: @Sendable (OperationAck) -> Void
+    ) async throws -> OperationResult? {
+        guard isCurrent(generation) else { return nil }
         try pruneExpired()
         let history = records.values.filter { $0.attempt.opID == attempt.opID }
         let count = history.count
@@ -91,39 +131,39 @@ public actor PhoneRelay {
             return nil
         }
         guard attempt.payload.botID == bot.id, attempt.payload.isValid else {
-            return try await report(.init(.rejected, reason: .invalidOperation), for: attempt, writesDone: count)
+            return try await report(.init(.rejected, reason: .invalidOperation), for: attempt, writesDone: count, generation: generation)
         }
         guard (1...WriteAttempt.limit).contains(attempt.number) else {
-            return try await report(.init(.rejected, reason: .attempt), for: attempt, writesDone: count)
+            return try await report(.init(.rejected, reason: .attempt), for: attempt, writesDone: count, generation: generation)
         }
         if let existing = records[attempt.key] {
             acknowledge(OperationAck(opID: attempt.opID, attempt: attempt.number))
             if let result = existing.result, result.result.isTerminal {
-                try await publish(result)
+                guard try await publish(.result(result), generation: generation) else { return nil }
                 return result
             }
             if activeOps.contains(attempt.opID) { return existing.result }
-            return try await reconcile(existing)
+            return try await reconcile(existing, generation: generation)
         }
 
         guard attempt.number == count + 1 else {
-            return try await report(.init(.rejected, reason: .attempt), for: attempt, writesDone: count)
+            return try await report(.init(.rejected, reason: .attempt), for: attempt, writesDone: count, generation: generation)
         }
         guard activeOps.insert(attempt.opID).inserted else { return nil }
-        defer { activeOps.remove(attempt.opID) }
+        defer { if isCurrent(generation) { activeOps.remove(attempt.opID) } }
 
         if attempt.number > 1 {
             let previousKey = AttemptKey(opID: attempt.opID, attempt: attempt.number - 1)
             guard let previous = records[previousKey], matches(previous, attempt: attempt, bot: bot) else {
-                return try await report(.init(.rejected, reason: .attempt), for: attempt, writesDone: count)
+                return try await report(.init(.rejected, reason: .attempt), for: attempt, writesDone: count, generation: generation)
             }
             switch previous.result?.result {
             case .accepted:
-                return try await report(.init(.accepted), for: attempt, writesDone: count)
+                return try await report(.init(.accepted), for: attempt, writesDone: count, generation: generation)
             case .notDelivered:
                 break
             default:
-                return try await report(.init(.rejected, reason: .attempt), for: attempt, writesDone: count)
+                return try await report(.init(.rejected, reason: .attempt), for: attempt, writesDone: count, generation: generation)
             }
         }
 
@@ -135,38 +175,44 @@ public actor PhoneRelay {
                           $0.result?.result.isTerminal != true
                   })
             else {
-                return try await report(.init(.rejected, reason: .inProgress), for: attempt, writesDone: count)
+                return try await report(.init(.rejected, reason: .inProgress), for: attempt, writesDone: count, generation: generation)
             }
             activeEntries.insert(entry)
         }
-        defer { if let entry { activeEntries.remove(entry) } }
+        defer { if isCurrent(generation), let entry { activeEntries.remove(entry) } }
 
-        if let outcome = await outbox.preflight(attempt, for: bot) {
-            return try await report(outcome, for: attempt, writesDone: count)
+        let preflight = await outbox.preflight(attempt, for: bot)
+        guard isCurrent(generation) else { return nil }
+        if let preflight {
+            return try await report(preflight, for: attempt, writesDone: count, generation: generation)
         }
         try Task.checkCancellation()
         let record = RelayRecord(attempt: attempt, bot: bot, admittedAt: now())
         do {
             try save(record)
         } catch {
-            return try await report(.init(.rejected, reason: .storage), for: attempt, writesDone: count)
+            return try await report(.init(.rejected, reason: .storage), for: attempt, writesDone: count, generation: generation)
         }
 
         resultsWithoutAdmission.removeAll { $0.key == attempt.key }
         acknowledge(OperationAck(opID: attempt.opID, attempt: attempt.number))
         let outcome = await outbox.write(attempt, for: bot)
-        return try await finish(outcome, for: record)
+        return try await finish(outcome, for: record, generation: generation)
     }
 
     @discardableResult
     public func recoverPending() async throws -> [OperationResult] {
+        let generation = self.generation
+        guard isCurrent(generation) else { return [] }
         try pruneExpired()
         let pending = records.values.filter { $0.result?.result.isTerminal != true }
         var recovered: [OperationResult] = []
         for record in pending {
             // Another recovery can finish this entry while the previous network read suspends.
             guard let current = records[record.attempt.key], current.result?.result.isTerminal != true else { continue }
-            if let result = try await reconcile(current) { recovered.append(result) }
+            let result = try await reconcile(current, generation: generation)
+            guard isCurrent(generation) else { return [] }
+            if let result { recovered.append(result) }
         }
         return recovered
     }
@@ -181,22 +227,25 @@ public actor PhoneRelay {
     }
 
     public func publishSnapshot(_ snapshot: InboxSnapshot) async throws {
+        let generation = self.generation
+        guard isCurrent(generation) else { return }
         try pruneExpired()
         var updated = snapshot
         updated.recentOps = recentResults()
-        let encoded = try EnvelopeCodec.encode(WCEnvelope(message: .snapshot(updated), sentAt: now()))
-        try await channel.updateApplicationContext(encoded)
+        _ = try await publish(.snapshot(updated), generation: generation)
     }
 
-    private func reconcile(_ record: RelayRecord) async throws -> OperationResult? {
+    private func reconcile(_ record: RelayRecord, generation: UInt64) async throws -> OperationResult? {
+        guard isCurrent(generation) else { return nil }
         let id = record.attempt.opID
         guard activeOps.insert(id).inserted else { return record.result }
-        defer { activeOps.remove(id) }
+        defer { if isCurrent(generation) { activeOps.remove(id) } }
         let outcome = await outbox.reconcile(record.attempt, for: record.bot)
-        return try await finish(outcome, for: record)
+        return try await finish(outcome, for: record, generation: generation)
     }
 
-    private func finish(_ outcome: WriteOutcome, for admitted: RelayRecord) async throws -> OperationResult {
+    private func finish(_ outcome: WriteOutcome, for admitted: RelayRecord, generation: UInt64) async throws -> OperationResult? {
+        guard isCurrent(generation) else { return nil }
         let attempt = admitted.attempt
         let result = makeResult(outcome, for: attempt, writesDone: attempt.number)
         if result.advances(admitted.result) {
@@ -205,17 +254,20 @@ public actor PhoneRelay {
             try save(updated)
         }
         let persisted = records[attempt.key]?.result ?? result
-        try await publish(persisted)
+        guard try await publish(.result(persisted), generation: generation) else { return nil }
         return persisted
     }
 
-    private func report(_ outcome: WriteOutcome, for attempt: WriteAttempt, writesDone: Int) async throws -> OperationResult {
+    private func report(
+        _ outcome: WriteOutcome, for attempt: WriteAttempt, writesDone: Int, generation: UInt64
+    ) async throws -> OperationResult? {
+        guard isCurrent(generation) else { return nil }
         let result = makeResult(outcome, for: attempt, writesDone: writesDone)
         // Preflight and storage failures have no admitted record but still go into the next snapshot.
         resultsWithoutAdmission.removeAll { $0.key == result.key }
         resultsWithoutAdmission.insert(result, at: 0)
         if resultsWithoutAdmission.count > 20 { resultsWithoutAdmission.removeLast() }
-        try await publish(result)
+        guard try await publish(.result(result), generation: generation) else { return nil }
         return result
     }
 
@@ -226,9 +278,29 @@ public actor PhoneRelay {
         )
     }
 
-    private func publish(_ result: OperationResult) async throws {
-        let encoded = try EnvelopeCodec.encode(WCEnvelope(message: .result(result), sentAt: now()))
-        try await channel.transferUserInfo(encoded)
+    private func publish(_ message: WCMessage, generation: UInt64) async throws -> Bool {
+        guard isCurrent(generation) else { return false }
+        let encoded = try EnvelopeCodec.encode(WCEnvelope(message: message, sentAt: now()))
+        pendingPublications += 1
+        defer {
+            pendingPublications -= 1
+            if pendingPublications == 0 {
+                let waiters = purgeWaiters
+                purgeWaiters.removeAll()
+                for waiter in waiters { waiter.resume() }
+            }
+        }
+        do {
+            if case .snapshot = message {
+                try await channel.updateApplicationContext(encoded)
+            } else {
+                try await channel.transferUserInfo(encoded)
+            }
+        } catch {
+            guard isCurrent(generation) else { return false }
+            throw error
+        }
+        return isCurrent(generation)
     }
 
     private func save(_ record: RelayRecord) throws {

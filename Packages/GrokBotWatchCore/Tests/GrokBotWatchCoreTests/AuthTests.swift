@@ -2,7 +2,7 @@ import Foundation
 import GrokBotWatchCore
 import Testing
 
-private struct SampleHasher: PKCEHasher {
+struct SampleHasher: PKCEHasher {
     func sha256(_ input: Data) -> Data {
         // RFC 7636 Appendix B vector, applied only to the matching input.
         guard String(decoding: input, as: UTF8.self) == "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk" else { return Data(repeating: 0, count: 32) }
