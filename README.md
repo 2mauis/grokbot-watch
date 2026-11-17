@@ -48,7 +48,7 @@ xcodebuild -project GrokBotWatch.xcodeproj -scheme 'GrokBotWatch Watch' \
   -destination 'generic/platform=watchOS Simulator' CODE_SIGNING_ALLOWED=NO build
 ```
 
-纯 Swift 核心包可在 macOS 或 Linux 上运行 `swift test --package-path Packages/GrokBotWatchCore`。本仓库暂未配置 CI。
+纯 Swift 核心包可在 macOS 或 Linux 上运行 `swift test --package-path Packages/GrokBotWatchCore`。GitHub CI 配置已在本地准备，尚未首跑验证：使用标准 `xcode-27` 预览 runner，显式选择 Xcode 27.2，执行完整核心测试、两个 scheme 的 Debug 无签名模拟器 clean build 和 iOS 产物内嵌 Watch 核验。范围、离线验证与故障处理见 [docs/ci.md](docs/ci.md)；不覆盖 Linux、真机、签名或真实适配器。
 
 ### Personal Team 真机安装
 
