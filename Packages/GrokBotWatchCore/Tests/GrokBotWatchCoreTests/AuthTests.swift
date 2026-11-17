@@ -10,14 +10,14 @@ private struct SampleHasher: PKCEHasher {
     }
 }
 
-private actor TestTokenStore: TokenStore {
+actor TestTokenStore: TokenStore {
     private var token: SessionToken?
     func load() -> SessionToken? { token }
     func save(_ token: SessionToken) { self.token = token }
     func clear() { token = nil }
 }
 
-private actor TestAuth: AuthTransport {
+actor TestAuth: AuthTransport {
     private var replies: [AuthorizationPoll]
     private(set) var refreshCount = 0
     init(_ replies: [AuthorizationPoll] = []) { self.replies = replies }
