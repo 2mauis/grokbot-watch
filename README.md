@@ -8,13 +8,13 @@ Apple Watch 上的 Grok Bot 轻量伴侣，配合官方 Grok Bot iPhone app 使�
 
 规格 v0.2 已进入第一批实现。B1、B2、B3、F1、F2、F8 的纯 Swift 逻辑已实现并有单元测试，iOS 和 watchOS App 已有占位页面。浏览器授权、Keychain、真实 HTTP 和 WatchConnectivity 适配器待接入。
 
-## 模拟器运行截图
+## 功能演示
 
-当前 SwiftUI 占位页面在 iOS 和 watchOS 27.2 模拟器上的运行效果。
+以下画面来自 Apple Watch Series 12（46 mm）的 watchOS 27.2 模拟器。演示界面使用现有 Swift 核心和模拟数据。
 
-| iPhone 18 Pro Max | Apple Watch Series 12（46 mm） |
-| :---: | :---: |
-| <img src="docs/screenshots/ios-simulator.png" alt="iPhone 上的 GrokBot Watch 占位页面" width="210"> | <img src="docs/screenshots/watchos-simulator.png" alt="Apple Watch 上的 GrokBot Watch 占位页面" width="165"> |
+| 收件箱 | 审批确认 | 快捷回复 |
+| :---: | :---: | :---: |
+| <img src="docs/screenshots/watchos-inbox.png" alt="收件箱列出待审批和待回复事项" width="190"> | <img src="docs/screenshots/watchos-approval.png" alt="审批确认显示允许一次和拒绝" width="190"> | <img src="docs/screenshots/watchos-quick-replies.png" alt="快捷回复列出三条候选" width="190"> |
 
 ## 功能（与 [docs/feature-map.md](docs/feature-map.md) 一致）
 
