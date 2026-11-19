@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+    <key>GrokBotLoginTarget</key><string>$(GROK_BOT_LOGIN_TARGET)</string>
+    <key>GrokBotOAuthClientID</key><string>$(GROK_BOT_OAUTH_CLIENT_ID)</string>
+</dict></plist>
