@@ -1,6 +1,7 @@
 # 架构 / Architecture（v0 草案）
 
 对应规格：[spec.md](spec.md)。官方依据都附了链接；结论需要真机验证的地方，标为 S-n（见 spec §7）。
+PR #5 的登录配置、只读刷新、快照裁剪和跨设备登出顺序见[配套 App 设计附录](specs/2026-11-20-companion-adapters.md)。
 
 ## 1. 总览
 

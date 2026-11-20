@@ -1,6 +1,7 @@
 # grokbot-watch 规格 v0 / Spec v0
 
 当前阶段（2026-11-17）：纯逻辑核心、占位 App 和 CI 已合入 main `e0226fe833b9fed617c7c1c6f06eb23d7b29fe9f`，**产品 MVP 尚未达成**。实现与验证分开记录于 [功能地图](feature-map.md) 和 [MVP 状态](mvp-status.md)，实际 CI 证据见 [ci.md](ci.md#公开运行证据)。需求版本仍为 v0.2；本次状态同步不改变下列需求、验收阈值或勾选标准。
+2026-11-20，PR #5 的[配套 App 设计附录](specs/2026-11-20-companion-adapters.md)待独立评审，覆盖 B1–B3、F8 和 F1/F2 本地预览。
 
 历史设计阶段状态：草案 v0.2 / 待复评（设计评审轮；v0.1 按首轮评审的 3 项阻断 S2 修订，v0.2 按复评的 2 项阻断 S2 修订，见 design/2026-11-16-review-decisions.md 和 design/2026-11-16-review-2-decisions.md）。采用模板：workflow-template 2.2.2（workflow v2.2）。
 对应功能地图：[feature-map.md](feature-map.md)。架构：[architecture.md](architecture.md) 保留设计阶段记录，当前 CI 状态以 [ci.md](ci.md) 为准。调研与决策归档：[design/](design/)。
